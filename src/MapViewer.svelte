@@ -48,6 +48,7 @@
   let showingPoints = false;
   let editingPoint = null;
   let hoverPointIndex = -1;
+  let showingDebug = false;
 
   // Rendering state
   let animationFrameId = null;
@@ -525,6 +526,10 @@
     scheduleRender();
   }
 
+  function toggleDebug() {
+    showingDebug = !showingDebug;
+  }
+
   $: needsMorePoints = referencePoints.length < 3;
 </script>
 
@@ -557,6 +562,13 @@
     >
       {showingPoints ? '👁️' : '📝'} Points ({referencePoints.length})
     </button>
+
+    <button 
+      class="control-btn debug-btn {showingDebug ? 'active' : ''}" 
+      on:click={toggleDebug}
+    >
+      🐛 Debug
+    </button>
   </div>
 
   {#if map && showingPointPicker}
@@ -586,7 +598,7 @@
   {/if}
 
   {#if editingPoint}
-    <div class="modal-overlay" on:click={cancelEdit}>
+    <div class="modal-overlay" role="dialog" aria-modal="true" on:click={cancelEdit} on:keydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}>
       <div class="modal-content" on:click|stopPropagation>
         <h2>Edit Point #{editingPoint.index + 1}</h2>
         
@@ -626,6 +638,118 @@
           </button>
           <button class="btn btn-primary" on:click={saveEditedPoint}>
             Save
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showingDebug}
+    <div class="modal-overlay" role="dialog" aria-modal="true" on:click={toggleDebug} on:keydown={(e) => { if (e.key === 'Escape') toggleDebug(); }}>
+      <div class="modal-content debug-modal" on:click|stopPropagation>
+        <h2>🐛 Debug Information</h2>
+        
+        <div class="debug-section">
+          <h3>Current GPS Position</h3>
+          {#if userPosition}
+            <div class="debug-info">
+              <div class="info-row">
+                <strong>Latitude:</strong>
+                <span>{userPosition.latitude.toFixed(6)}</span>
+              </div>
+              <div class="info-row">
+                <strong>Longitude:</strong>
+                <span>{userPosition.longitude.toFixed(6)}</span>
+              </div>
+              <div class="info-row">
+                <strong>Accuracy:</strong>
+                <span>{userPosition.accuracy?.toFixed(0)}m</span>
+              </div>
+              {#if geoTransform}
+                {@const imgCoords = geoToImage(userPosition.longitude, userPosition.latitude, geoTransform, geoTransformType)}
+                <div class="info-row">
+                  <strong>Image Coordinates:</strong>
+                  <span>({imgCoords.imageX.toFixed(1)}, {imgCoords.imageY.toFixed(1)})</span>
+                </div>
+              {/if}
+            </div>
+          {:else}
+            <div class="debug-info">
+              <em>No GPS data available</em>
+            </div>
+          {/if}
+        </div>
+
+        <div class="debug-section">
+          <h3>Transform Information</h3>
+          <div class="debug-info">
+            <div class="info-row">
+              <strong>Transform Type:</strong>
+              <span>{geoTransformType || 'None'}</span>
+            </div>
+            {#if geoTransform}
+              <div class="info-row">
+                <strong>Transform Data:</strong>
+                <pre>{JSON.stringify(geoTransform, null, 2)}</pre>
+              </div>
+            {/if}
+          </div>
+        </div>
+
+        <div class="debug-section">
+          <h3>Reference Points ({referencePoints.length})</h3>
+          {#if referencePoints.length > 0}
+            <div class="debug-info">
+              {#each referencePoints as point, index}
+                <div class="point-debug">
+                  <div class="point-header">Point {index + 1}</div>
+                  <div class="info-row">
+                    <strong>GPS:</strong>
+                    <span>({point.lat.toFixed(6)}, {point.lon.toFixed(6)})</span>
+                  </div>
+                  <div class="info-row">
+                    <strong>Image:</strong>
+                    <span>({point.imageX.toFixed(1)}, {point.imageY.toFixed(1)})</span>
+                  </div>
+                </div>
+              {/each}
+            </div>
+          {:else}
+            <div class="debug-info">
+              <em>No reference points defined</em>
+            </div>
+          {/if}
+        </div>
+
+        <div class="debug-section">
+          <h3>Image Information</h3>
+          <div class="debug-info">
+            <div class="info-row">
+              <strong>Dimensions:</strong>
+              <span>{imageWidth} × {imageHeight}</span>
+            </div>
+            <div class="info-row">
+              <strong>Canvas:</strong>
+              <span>{canvasWidth} × {canvasHeight}</span>
+            </div>
+            <div class="info-row">
+              <strong>Scale:</strong>
+              <span>{transform.scale.toFixed(3)}</span>
+            </div>
+            <div class="info-row">
+              <strong>Translation:</strong>
+              <span>({transform.translateX.toFixed(1)}, {transform.translateY.toFixed(1)})</span>
+            </div>
+            <div class="info-row">
+              <strong>Rotation:</strong>
+              <span>{(transform.rotation * 180 / Math.PI).toFixed(1)}°</span>
+            </div>
+          </div>
+        </div>
+        
+        <div class="button-group">
+          <button class="btn btn-secondary" on:click={toggleDebug}>
+            Close
           </button>
         </div>
       </div>
