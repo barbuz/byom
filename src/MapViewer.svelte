@@ -2,7 +2,6 @@
   import { onMount, onDestroy } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
   import { calculateTransform, geoToImage } from './lib/transforms.js';
-  import ReferencePointPicker from './ReferencePointPicker.svelte';
   import './styles/MapViewer.css';
 
   export let mapId;
@@ -36,6 +35,11 @@
   let lastTouchAngle = 0;
   let lastTouchCenter = { x: 0, y: 0 };
   let touchStartTransform = null;
+  
+  // Long touch detection
+  let longTouchTimer = null;
+  let longTouchStartPos = null;
+  let isLongTouch = false;
 
   // GPS state
   let userPosition = null;
@@ -44,11 +48,22 @@
   let geoTransformType = null;
 
   // UI state
-  let showingPointPicker = false;
   let showingPoints = false;
   let editingPoint = null;
   let hoverPointIndex = -1;
   let showingDebug = false;
+  let pendingReferencePoint = null;
+  let showingCoordinateSelection = false;
+  let coordinateMethod = null;
+  let manualLat = '';
+  let manualLon = '';
+  let gpsPosition = null;
+  let gpsError = null;
+  let selectedLon = null;
+  let selectedLat = null;
+  let mapContainer;
+  let osmMap;
+  let osmMapMarker = null;
 
   // Rendering state
   let animationFrameId = null;
@@ -244,6 +259,33 @@
 
     ctx.restore();
 
+    // Draw pending reference point
+    if (pendingReferencePoint) {
+      ctx.save();
+      ctx.translate(transform.translateX, transform.translateY);
+      ctx.rotate(transform.rotation);
+      ctx.scale(transform.scale, transform.scale);
+      ctx.translate(-imageWidth / 2, -imageHeight / 2);
+
+      // Draw pending point marker
+      ctx.fillStyle = 'rgba(255, 152, 0, 0.9)';
+      ctx.beginPath();
+      ctx.arc(pendingReferencePoint.imageX, pendingReferencePoint.imageY, 15, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = 'white';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+
+      // Draw pulsing effect
+      ctx.strokeStyle = 'rgba(255, 152, 0, 0.5)';
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.arc(pendingReferencePoint.imageX, pendingReferencePoint.imageY, 20, 0, Math.PI * 2);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
     // Draw user position
     if (userPosition && geoTransform) {
       try {
@@ -338,11 +380,21 @@
     e.preventDefault();
     
     if (e.touches.length === 1) {
-      isPanning = true;
       const touch = e.touches[0];
+      longTouchStartPos = { x: touch.clientX, y: touch.clientY };
+      isLongTouch = false;
+      
+      // Start long touch timer
+      longTouchTimer = setTimeout(() => {
+        isLongTouch = true;
+        handleLongTouch(touch.clientX, touch.clientY);
+      }, 500); // 500ms for long touch
+      
+      isPanning = true;
       lastTouchCenter = { x: touch.clientX, y: touch.clientY };
       touchStartTransform = { ...transform };
     } else if (e.touches.length === 2) {
+      clearTimeout(longTouchTimer);
       isPanning = false;
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -369,7 +421,20 @@
   function handleTouchMove(e) {
     e.preventDefault();
 
-    if (e.touches.length === 1 && isPanning) {
+    // Cancel long touch if finger moved too much
+    if (e.touches.length === 1 && longTouchStartPos) {
+      const touch = e.touches[0];
+      const moveDistance = Math.hypot(
+        touch.clientX - longTouchStartPos.x,
+        touch.clientY - longTouchStartPos.y
+      );
+      
+      if (moveDistance > 10) { // Moved more than 10px
+        clearTimeout(longTouchTimer);
+      }
+    }
+
+    if (e.touches.length === 1 && isPanning && !isLongTouch) {
       const touch = e.touches[0];
       const dx = touch.clientX - lastTouchCenter.x;
       const dy = touch.clientY - lastTouchCenter.y;
@@ -416,7 +481,59 @@
   }
 
   function handleTouchEnd(e) {
+    clearTimeout(longTouchTimer);
+    longTouchStartPos = null;
+    isLongTouch = false;
     isPanning = false;
+  }
+
+  function handleLongTouch(screenX, screenY) {
+    // Convert screen coordinates to image coordinates
+    const imageCoords = screenToImage(screenX, screenY);
+    
+    if (imageCoords) {
+      pendingReferencePoint = {
+        imageX: imageCoords.x,
+        imageY: imageCoords.y,
+        screenX: screenX,
+        screenY: screenY
+      };
+      
+      // Show a visual feedback
+      scheduleRender();
+      
+      // Show coordinate selection modal after a short delay
+      setTimeout(() => {
+        showCoordinateSelection();
+      }, 100);
+    }
+  }
+
+  function screenToImage(screenX, screenY) {
+    if (!imageWidth || !imageHeight) return null;
+    
+    // Apply inverse transformations to get image coordinates
+    const cos_r = Math.cos(-transform.rotation);
+    const sin_r = Math.sin(-transform.rotation);
+    
+    // Translate to origin
+    let x = screenX - transform.translateX;
+    let y = screenY - transform.translateY;
+    
+    // Apply inverse rotation
+    const rotatedX = cos_r * x - sin_r * y;
+    const rotatedY = sin_r * x + cos_r * y;
+    
+    // Apply inverse scale and translate to image coordinates
+    const imageX = (rotatedX / transform.scale) + (imageWidth / 2);
+    const imageY = (rotatedY / transform.scale) + (imageHeight / 2);
+    
+    // Check if coordinates are within image bounds
+    if (imageX >= 0 && imageX <= imageWidth && imageY >= 0 && imageY <= imageHeight) {
+      return { x: imageX, y: imageY };
+    }
+    
+    return null;
   }
 
   function handleCanvasClick(e) {
@@ -468,10 +585,6 @@
     window.location.hash = '';
   }
 
-  function openPointPicker() {
-    showingPointPicker = true;
-  }
-
   function togglePoints() {
     showingPoints = !showingPoints;
     if (!showingPoints) {
@@ -479,11 +592,6 @@
       hoverPointIndex = -1;
     }
     scheduleRender();
-  }
-
-  function handlePointAdded() {
-    showingPointPicker = false;
-    loadMapData(); // Reload to get updated points
   }
 
   async function saveEditedPoint() {
@@ -530,6 +638,217 @@
     showingDebug = !showingDebug;
   }
 
+  function showCoordinateSelection() {
+    showingCoordinateSelection = true;
+    coordinateMethod = null;
+    selectedLon = null;
+    selectedLat = null;
+    manualLat = '';
+    manualLon = '';
+    gpsPosition = null;
+    gpsError = null;
+  }
+
+  function hideCoordinateSelection() {
+    showingCoordinateSelection = false;
+    pendingReferencePoint = null;
+    scheduleRender();
+  }
+
+  function selectCoordinateMethod(method) {
+    coordinateMethod = method;
+    
+    if (method === 'gps') {
+      getCurrentGPS();
+    } else if (method === 'map') {
+      setTimeout(() => initMap(), 100);
+    }
+  }
+
+  function getCurrentGPS() {
+    gpsError = null;
+    
+    if (!navigator.geolocation) {
+      gpsError = 'Geolocation not supported';
+      return;
+    }
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        gpsPosition = {
+          lat: position.coords.latitude,
+          lon: position.coords.longitude,
+        };
+        selectedLat = gpsPosition.lat;
+        selectedLon = gpsPosition.lon;
+      },
+      (error) => {
+        gpsError = `GPS error: ${error.message}`;
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 10000,
+        maximumAge: 0,
+      }
+    );
+  }
+
+  function useManualCoordinates() {
+    const lat = parseFloat(manualLat);
+    const lon = parseFloat(manualLon);
+    
+    if (isNaN(lat) || isNaN(lon)) {
+      alert('Please enter valid numbers');
+      return;
+    }
+    
+    if (lat < -90 || lat > 90) {
+      alert('Latitude must be between -90 and 90');
+      return;
+    }
+    
+    if (lon < -180 || lon > 180) {
+      alert('Longitude must be between -180 and 180');
+      return;
+    }
+    
+    selectedLat = lat;
+    selectedLon = lon;
+  }
+
+  async function initMap() {
+    if (!mapContainer) return;
+
+    // Dynamically import MapLibre
+    const maplibregl = await import('maplibre-gl');
+
+    // Calculate initial center and zoom
+    let initialCenter = [0, 0];
+    let initialZoom = 2;
+
+    if (referencePoints.length > 0) {
+      // Calculate bounds of existing reference points
+      let minLat = Infinity, maxLat = -Infinity;
+      let minLon = Infinity, maxLon = -Infinity;
+      
+      referencePoints.forEach(point => {
+        minLat = Math.min(minLat, point.lat);
+        maxLat = Math.max(maxLat, point.lat);
+        minLon = Math.min(minLon, point.lon);
+        maxLon = Math.max(maxLon, point.lon);
+      });
+      
+      // Calculate center
+      const avgLat = (minLat + maxLat) / 2;
+      const avgLon = (minLon + maxLon) / 2;
+      initialCenter = [avgLon, avgLat];
+      
+      // Calculate zoom to fit all points with padding
+      const latDiff = maxLat - minLat;
+      const lonDiff = maxLon - minLon;
+      const maxDiff = Math.max(latDiff, lonDiff);
+      
+      // Adjust zoom based on the spread of points
+      if (maxDiff > 10) {
+        initialZoom = 4; // Very large area (country/continental)
+      } else if (maxDiff > 5) {
+        initialZoom = 6; // Large area (state/province)
+      } else if (maxDiff > 1) {
+        initialZoom = 8; // Medium area (city/region)
+      } else if (maxDiff > 0.1) {
+        initialZoom = 10; // Small area (neighborhood)
+      } else if (maxDiff > 0.01) {
+        initialZoom = 12; // Very small area (street level)
+      } else {
+        initialZoom = 14; // Tiny area (building level)
+      }
+    } else if (userPosition) {
+      // Use current GPS location
+      initialCenter = [userPosition.longitude, userPosition.latitude];
+      initialZoom = 14; // Street level zoom for GPS location
+    }
+
+    osmMap = new maplibregl.Map({
+      container: mapContainer,
+      style: {
+        version: 8,
+        sources: {
+          osm: {
+            type: 'raster',
+            tiles: [
+              'https://a.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              'https://b.tile.openstreetmap.org/{z}/{x}/{y}.png',
+              'https://c.tile.openstreetmap.org/{z}/{x}/{y}.png',
+            ],
+            tileSize: 256,
+            attribution: '© OpenStreetMap contributors',
+          },
+        },
+        layers: [
+          {
+            id: 'osm',
+            type: 'raster',
+            source: 'osm',
+          },
+        ],
+      },
+      center: initialCenter,
+      zoom: initialZoom,
+    });
+
+    osmMap.on('click', (e) => {
+      const { lng, lat } = e.lngLat;
+      selectedLon = lng;
+      selectedLat = lat;
+
+      // Add/update marker
+      if (osmMapMarker) {
+        osmMapMarker.setLngLat([lng, lat]);
+      } else {
+        osmMapMarker = new maplibregl.Marker({ color: '#2196F3' })
+          .setLngLat([lng, lat])
+          .addTo(osmMap);
+      }
+    });
+
+    // Fallback: try to get user's location if we still don't have a good center
+    if (referencePoints.length === 0 && !userPosition && navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (position) => {
+          osmMap.setCenter([position.coords.longitude, position.coords.latitude]);
+          osmMap.setZoom(14); // Street level zoom
+        },
+        () => {
+          // Ignore error, keep default center
+        }
+      );
+    }
+  }
+
+  async function saveReferencePoint() {
+    if (!pendingReferencePoint || selectedLon === null || selectedLat === null) return;
+
+    try {
+      const { addReferencePoint } = await import('./lib/db.js');
+      await addReferencePoint({
+        mapId: parseInt(mapId),
+        imageX: pendingReferencePoint.imageX,
+        imageY: pendingReferencePoint.imageY,
+        lon: selectedLon,
+        lat: selectedLat,
+      });
+
+      hideCoordinateSelection();
+      await loadMapData();
+      scheduleRender();
+    } catch (error) {
+      console.error('Error saving reference point:', error);
+      alert('Failed to save reference point');
+    }
+  }
+
+  $: canSavePoint = pendingReferencePoint && selectedLon !== null && selectedLat !== null;
+
   $: needsMorePoints = referencePoints.length < 3;
 </script>
 
@@ -550,13 +869,6 @@
     </button>
 
     <button 
-      class="control-btn add-point-btn {needsMorePoints ? 'highlight' : ''}" 
-      on:click={openPointPicker}
-    >
-      {needsMorePoints ? '⚠️' : '📍'} Add Point
-    </button>
-
-    <button 
       class="control-btn edit-points-btn {showingPoints ? 'active' : ''}" 
       on:click={togglePoints}
     >
@@ -570,17 +882,6 @@
       🐛 Debug
     </button>
   </div>
-
-  {#if map && showingPointPicker}
-    <ReferencePointPicker 
-      {mapId}
-      {imageUrl}
-      {imageWidth}
-      {imageHeight}
-      on:close={() => showingPointPicker = false}
-      on:added={handlePointAdded}
-    />
-  {/if}
 
   {#if showingPoints && referencePoints.length > 0}
     <div class="points-info">
@@ -750,6 +1051,120 @@
         <div class="button-group">
           <button class="btn btn-secondary" on:click={toggleDebug}>
             Close
+          </button>
+        </div>
+      </div>
+    </div>
+  {/if}
+
+  {#if showingCoordinateSelection}
+    <div class="modal-overlay" role="dialog" aria-modal="true" on:click={hideCoordinateSelection} on:keydown={(e) => { if (e.key === 'Escape') hideCoordinateSelection(); }}>
+      <div class="modal-content" on:click|stopPropagation>
+        <h2>📍 Add Reference Point</h2>
+        
+        <div class="point-edit-info">
+          <div class="info-row">
+            <strong>Image coordinates:</strong>
+            <span>({pendingReferencePoint.imageX.toFixed(0)}, {pendingReferencePoint.imageY.toFixed(0)})</span>
+          </div>
+        </div>
+
+        <p class="instruction">Select the real-world coordinates for this point</p>
+        
+        {#if !coordinateMethod}
+          <div class="method-selection">
+            <button class="method-btn" on:click={() => selectCoordinateMethod('gps')}>
+              <div class="method-icon">📍</div>
+              <div class="method-title">Use GPS</div>
+              <div class="method-desc">Use current device location</div>
+            </button>
+            
+            <button class="method-btn" on:click={() => selectCoordinateMethod('manual')}>
+              <div class="method-icon">⌨️</div>
+              <div class="method-title">Manual Entry</div>
+              <div class="method-desc">Type coordinates</div>
+            </button>
+            
+            <button class="method-btn" on:click={() => selectCoordinateMethod('map')}>
+              <div class="method-icon">🗺️</div>
+              <div class="method-title">Select on Map</div>
+              <div class="method-desc">Choose from OSM map (online)</div>
+            </button>
+          </div>
+        {:else if coordinateMethod === 'gps'}
+          <div class="coordinate-input">
+            {#if gpsError}
+              <div class="error-message">{gpsError}</div>
+              <button class="btn btn-secondary" on:click={getCurrentGPS}>Try Again</button>
+            {:else if gpsPosition}
+              <div class="success-message">
+                ✓ GPS location acquired
+                <div class="coords-display">
+                  Lat: {gpsPosition.lat.toFixed(6)}<br>
+                  Lon: {gpsPosition.lon.toFixed(6)}
+                </div>
+              </div>
+            {:else}
+              <div class="loading-message">📡 Getting GPS location...</div>
+            {/if}
+            <button class="btn btn-secondary" on:click={() => coordinateMethod = null}>
+              Choose Different Method
+            </button>
+          </div>
+        {:else if coordinateMethod === 'manual'}
+          <div class="coordinate-input">
+            <div class="input-group">
+              <label for="manual-lat">Latitude (-90 to 90)</label>
+              <input 
+                id="manual-lat"
+                type="number" 
+                step="any"
+                bind:value={manualLat}
+                placeholder="e.g., 40.7128"
+              />
+            </div>
+            <div class="input-group">
+              <label for="manual-lon">Longitude (-180 to 180)</label>
+              <input 
+                id="manual-lon"
+                type="number" 
+                step="any"
+                bind:value={manualLon}
+                placeholder="e.g., -74.0060"
+              />
+            </div>
+            <button class="btn btn-primary" on:click={useManualCoordinates}>
+              Use These Coordinates
+            </button>
+            <button class="btn btn-secondary" on:click={() => coordinateMethod = null}>
+              Choose Different Method
+            </button>
+          </div>
+        {:else if coordinateMethod === 'map'}
+          <div class="map-input">
+            <p class="map-instruction">Click on the map to select coordinates</p>
+            <div class="map-container" bind:this={mapContainer}></div>
+            {#if selectedLon !== null && selectedLat !== null}
+              <div class="coords-display">
+                Selected: {selectedLat.toFixed(6)}, {selectedLon.toFixed(6)}
+              </div>
+            {/if}
+            <button class="btn btn-secondary" on:click={() => coordinateMethod = null}>
+              Choose Different Method
+            </button>
+          </div>
+        {/if}
+        
+        <div class="button-group">
+          <button class="btn btn-secondary" on:click={hideCoordinateSelection}>
+            Cancel
+          </button>
+          <button 
+            class="btn btn-primary" 
+            disabled={!canSavePoint}
+            on:click={saveReferencePoint}
+          >
+            Save Point
           </button>
         </div>
       </div>
