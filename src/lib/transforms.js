@@ -1,6 +1,11 @@
 /**
  * Coordinate transformation utilities for BYOM
  */
+import { 
+  fromTriangles,
+  applyToPoint,
+  inverse
+} from 'transformation-matrix';
 
 /**
  * Compute similarity transform (2 points)
@@ -45,7 +50,8 @@ export function computeSimilarityTransform(referencePoints) {
 }
 
 /**
- * Compute affine transform using least-squares (3+ points)
+ * Compute affine transform using transformation-matrix library
+ * Uses fromTriangles to compute transform from reference points
  * Transformation: lon = a*x + b*y + c
  *                 lat = d*x + e*y + f
  * @param {Array} referencePoints - [{imageX, imageY, lon, lat}, ...]
@@ -56,63 +62,30 @@ export function computeAffineTransform(referencePoints) {
     throw new Error('Need at least 3 reference points for affine transform');
   }
 
-  const n = referencePoints.length;
+  // TODO: this is using just 3 arbitrary points, we want to switch to a mesh instead
+  // Use the first 3 non-collinear points to compute the transform
+  // fromTriangles expects triangles as arrays of points
+  const imageTriangle = referencePoints.slice(0, 3).map(p => [p.imageX, p.imageY]);
+  const geoTriangle = referencePoints.slice(0, 3).map(p => [p.lon, p.lat]);
   
-  // Build matrices for least-squares solution
-  // For lon: [x y 1] * [a b c]' = lon
-  let sum_x = 0, sum_y = 0, sum_x2 = 0, sum_y2 = 0, sum_xy = 0;
-  let sum_lon = 0, sum_lat = 0, sum_x_lon = 0, sum_y_lon = 0;
-  let sum_x_lat = 0, sum_y_lat = 0;
-
-  for (const p of referencePoints) {
-    sum_x += p.imageX;
-    sum_y += p.imageY;
-    sum_x2 += p.imageX * p.imageX;
-    sum_y2 += p.imageY * p.imageY;
-    sum_xy += p.imageX * p.imageY;
-    sum_lon += p.lon;
-    sum_lat += p.lat;
-    sum_x_lon += p.imageX * p.lon;
-    sum_y_lon += p.imageY * p.lon;
-    sum_x_lat += p.imageX * p.lat;
-    sum_y_lat += p.imageY * p.lat;
-  }
-
-  // Solve for lon coefficients (a, b, c)
-  const det = n * (sum_x2 * sum_y2 - sum_xy * sum_xy) 
-            - sum_x * (sum_x * sum_y2 - sum_y * sum_xy)
-            + sum_y * (sum_x * sum_xy - sum_y * sum_x2);
-
-  if (Math.abs(det) < 1e-10) {
+  try {
+    // Compute the affine transformation matrix
+    const matrix = fromTriangles(imageTriangle, geoTriangle);
+    
+    // Extract coefficients from the matrix
+    // The matrix format is: [a, b, 0, c, d, 0, e, f, 1]
+    // But transformation-matrix uses: [a, c, e, b, d, f, 0, 0, 1]
+    return {
+      a: matrix.a,
+      b: matrix.c,
+      c: matrix.e,
+      d: matrix.b, 
+      e: matrix.d,
+      f: matrix.f
+    };
+  } catch (error) {
     throw new Error('Points are collinear, cannot compute affine transform');
   }
-
-  const a = (n * (sum_x_lon * sum_y2 - sum_y_lon * sum_xy)
-           - sum_x * (sum_lon * sum_y2 - sum_y * sum_y_lon)
-           + sum_y * (sum_lon * sum_xy - sum_y * sum_x_lon)) / det;
-
-  const b = (n * (sum_x2 * sum_y_lon - sum_xy * sum_x_lon)
-           - sum_x * (sum_x * sum_y_lon - sum_y * sum_x_lon)
-           + sum_y * (sum_x * sum_lon - sum_x2 * sum_lon)) / det;
-
-  const c = (n * (sum_x2 * sum_y2 - sum_xy * sum_xy)
-           - sum_x * (sum_x * sum_y2 - sum_y * sum_xy)
-           + sum_y * (sum_x * sum_xy - sum_y * sum_x2)) / det;
-
-  const c_val = (sum_lon - a * sum_x - b * sum_y) / n;
-
-  // Solve for lat coefficients (d, e, f)
-  const d = (n * (sum_x_lat * sum_y2 - sum_y_lat * sum_xy)
-           - sum_x * (sum_lat * sum_y2 - sum_y * sum_y_lat)
-           + sum_y * (sum_lat * sum_xy - sum_y * sum_x_lat)) / det;
-
-  const e = (n * (sum_x2 * sum_y_lat - sum_xy * sum_x_lat)
-           - sum_x * (sum_x * sum_y_lat - sum_y * sum_x_lat)
-           + sum_y * (sum_x * sum_lat - sum_x2 * sum_lat)) / det;
-
-  const f_val = (sum_lat - d * sum_x - e * sum_y) / n;
-
-  return { a, b, c: c_val, d, e, f: f_val };
 }
 
 /**
@@ -163,17 +136,17 @@ export function geoToImage(lon, lat, transform, type) {
   } else if (type === 'affine') {
     const { a, b, c, d, e, f } = transform;
     
-    // Inverse affine transformation
-    const det = a * e - b * d;
-    if (Math.abs(det) < 1e-10) {
+    // Create transformation matrix and use library's inverse function
+    const matrix = { a, b: d, c: b, d: e, e: c, f };
+    const inverseMatrix = inverse(matrix);
+    
+    if (!inverseMatrix) {
       throw new Error('Transform is singular');
     }
-
-    const lon_shifted = lon - c;
-    const lat_shifted = lat - f;
-    const imageX = (e * lon_shifted - b * lat_shifted) / det;
-    const imageY = (-d * lon_shifted + a * lat_shifted) / det;
-    return { imageX, imageY };
+    
+    // Apply inverse transformation
+    const result = applyToPoint(inverseMatrix, { x: lon, y: lat });
+    return { imageX: result.x, imageY: result.y };
   }
   throw new Error('Unknown transform type');
 }
