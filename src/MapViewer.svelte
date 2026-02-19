@@ -300,12 +300,26 @@
         ctx.translate(transform.translateX, transform.translateY);
         ctx.rotate(transform.rotation);
         ctx.scale(transform.scale, transform.scale);
+        ctx.translate(-imageWidth / 2, -imageHeight / 2);
 
         // Draw accuracy circle
         if (userPosition.accuracy) {
           // Rough approximation: 1 degree ≈ 111km
           const accuracyInDegrees = userPosition.accuracy / 111000;
-          const accuracyInPixels = accuracyInDegrees * Math.abs(geoTransform.a || geoTransform.scale);
+          
+          // Use average scale factor from transform coefficients for more accurate representation
+          let scaleFactor;
+          if (geoTransformType === 'affine') {
+            // For affine transform, use average of x and y scale factors
+            const scaleX = Math.sqrt(geoTransform.a * geoTransform.a + geoTransform.d * geoTransform.d);
+            const scaleY = Math.sqrt(geoTransform.b * geoTransform.b + geoTransform.e * geoTransform.e);
+            scaleFactor = (scaleX + scaleY) / 2;
+          } else {
+            // For similarity transform, use the scale factor
+            scaleFactor = geoTransform.scale;
+          }
+          
+          const accuracyInPixels = accuracyInDegrees * scaleFactor;
           
           ctx.strokeStyle = 'rgba(76, 175, 80, 0.3)';
           ctx.fillStyle = 'rgba(76, 175, 80, 0.1)';
