@@ -482,18 +482,29 @@
       
       // Scale
       const scaleFactor = distance / lastTouchDistance;
-      transform.scale = touchStartTransform.scale * scaleFactor;
-      transform.scale = Math.max(0.1, Math.min(10, transform.scale));
+      const newScale = touchStartTransform.scale * scaleFactor;
+      const clampedScale = Math.max(0.1, Math.min(10, newScale));
+      
+      // Calculate zoom center adjustment
+      // We want to zoom around the current pinch center, not the image center
+      const scaleChange = clampedScale / touchStartTransform.scale;
+      
+      // Adjust translation to keep the pinch center fixed during zoom
+      const pinchCenterOffsetX = center.x - touchStartTransform.translateX;
+      const pinchCenterOffsetY = center.y - touchStartTransform.translateY;
+      
+      // Apply the scale change to the offset
+      const scaledOffsetX = pinchCenterOffsetX * scaleChange;
+      const scaledOffsetY = pinchCenterOffsetY * scaleChange;
+      
+      // Calculate new translation to keep pinch center fixed
+      transform.translateX = center.x - scaledOffsetX;
+      transform.translateY = center.y - scaledOffsetY;
+      transform.scale = clampedScale;
       
       // Rotation
       const rotationDelta = angle - lastTouchAngle;
       transform.rotation = touchStartTransform.rotation + rotationDelta;
-      
-      // Adjust translation to keep center point fixed
-      const dx = center.x - lastTouchCenter.x;
-      const dy = center.y - lastTouchCenter.y;
-      transform.translateX = touchStartTransform.translateX + dx;
-      transform.translateY = touchStartTransform.translateY + dy;
       
       scheduleRender();
     }
