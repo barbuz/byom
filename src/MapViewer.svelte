@@ -41,6 +41,11 @@
   let longTouchStartPos = null;
   let isLongTouch = false;
 
+  // Mouse interaction state
+  let isMouseDown = false;
+  let mouseStartPos = null;
+  let mouseStartTransform = null;
+
   // GPS state
   let userPosition = null;
   let gpsWatchId = null;
@@ -401,7 +406,7 @@
       // Start long touch timer
       longTouchTimer = setTimeout(() => {
         isLongTouch = true;
-        handleLongTouch(touch.clientX, touch.clientY);
+        handleLongPress(touch.clientX, touch.clientY);
       }, 500); // 500ms for long touch
       
       isPanning = true;
@@ -496,12 +501,23 @@
 
   function handleTouchEnd(e) {
     clearTimeout(longTouchTimer);
+    
+    // Handle tap for point editing (mobile)
+    if (e.changedTouches.length === 1 && !isLongTouch && showingPoints) {
+      const touch = e.changedTouches[0];
+      const rect = canvas.getBoundingClientRect();
+      const x = touch.clientX - rect.left;
+      const y = touch.clientY - rect.top;
+      
+      handlePointEditing(x, y);
+    }
+    
     longTouchStartPos = null;
     isLongTouch = false;
     isPanning = false;
   }
 
-  function handleLongTouch(screenX, screenY) {
+  function handleLongPress(screenX, screenY) {
     // Convert screen coordinates to image coordinates
     const imageCoords = screenToImage(screenX, screenY);
     
@@ -520,6 +536,17 @@
       setTimeout(() => {
         showCoordinateSelection();
       }, 100);
+    }
+  }
+
+  function handlePointEditing(screenX, screenY) {
+    if (!showingPoints) return;
+    
+    const pointIndex = getPointAtScreen(screenX, screenY);
+    
+    if (pointIndex >= 0) {
+      editingPoint = { ...referencePoints[pointIndex], index: pointIndex };
+      scheduleRender();
     }
   }
 
@@ -551,38 +578,48 @@
   }
 
   function handleCanvasClick(e) {
-    if (!showingPoints) return;
-    
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    const pointIndex = getPointAtScreen(x, y);
+    // Handle point editing (both click and tap)
+    handlePointEditing(x, y);
     
-    if (pointIndex >= 0) {
-      editingPoint = { ...referencePoints[pointIndex], index: pointIndex };
-      scheduleRender();
+    // Handle click for adding points (desktop) - only when not in edit mode
+    if (!showingPoints) {
+      handleLongPress(x, y);
     }
   }
 
   function handleCanvasMouseMove(e) {
-    if (!showingPoints) {
-      if (hoverPointIndex !== -1) {
-        hoverPointIndex = -1;
-        scheduleRender();
-      }
-      return;
-    }
-    
     const rect = canvas.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    const pointIndex = getPointAtScreen(x, y);
+    // Handle hover effects for points
+    if (showingPoints) {
+      const pointIndex = getPointAtScreen(x, y);
+      
+      if (pointIndex !== hoverPointIndex) {
+        hoverPointIndex = pointIndex;
+        canvas.style.cursor = pointIndex >= 0 ? 'pointer' : 'default';
+        scheduleRender();
+      }
+    } else {
+      if (hoverPointIndex !== -1) {
+        hoverPointIndex = -1;
+        canvas.style.cursor = 'default';
+        scheduleRender();
+      }
+    }
     
-    if (pointIndex !== hoverPointIndex) {
-      hoverPointIndex = pointIndex;
-      canvas.style.cursor = pointIndex >= 0 ? 'pointer' : 'default';
+    // Handle panning with mouse drag
+    if (isMouseDown && mouseStartPos) {
+      const dx = x - mouseStartPos.x;
+      const dy = y - mouseStartPos.y;
+      
+      transform.translateX = mouseStartTransform.translateX + dx;
+      transform.translateY = mouseStartTransform.translateY + dy;
       scheduleRender();
     }
   }
@@ -593,6 +630,22 @@
     transform.scale *= scaleFactor;
     transform.scale = Math.max(0.1, Math.min(10, transform.scale));
     scheduleRender();
+  }
+
+  function handleMouseDown(e) {
+    const rect = canvas.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+    
+    isMouseDown = true;
+    mouseStartPos = { x, y };
+    mouseStartTransform = { ...transform };
+  }
+
+  function handleMouseUp(e) {
+    isMouseDown = false;
+    mouseStartPos = null;
+    mouseStartTransform = null;
   }
 
   function goBack() {
@@ -875,6 +928,9 @@
     on:wheel={handleWheel}
     on:click={handleCanvasClick}
     on:mousemove={handleCanvasMouseMove}
+    on:mousedown={handleMouseDown}
+    on:mouseup={handleMouseUp}
+    on:mouseleave={handleMouseUp}
   ></canvas>
 
   <div class="controls">
@@ -900,7 +956,10 @@
   {#if showingPoints && referencePoints.length > 0}
     <div class="points-info">
       <div class="points-hint">
-        💡 Click on a point to edit its coordinates
+        💡 Desktop: Click on a point to edit | Mobile: Tap on a point to edit
+      </div>
+      <div class="points-hint">
+        📍 Add points: Desktop: Click | Mobile: Long touch
       </div>
       <div class="transform-status">
         {#if referencePoints.length === 2}
@@ -908,6 +967,12 @@
         {:else if referencePoints.length >= 3}
           ✓ Affine transform ({referencePoints.length} points)
         {/if}
+      </div>
+    </div>
+  {:else if !showingPoints}
+    <div class="points-info">
+      <div class="points-hint">
+        📍 Add reference points: Desktop: Click | Mobile: Long touch
       </div>
     </div>
   {/if}
