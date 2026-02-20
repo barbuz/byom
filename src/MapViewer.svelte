@@ -502,9 +502,9 @@
       transform.translateY = center.y - scaledOffsetY;
       transform.scale = clampedScale;
       
-      // Rotation
-      const rotationDelta = angle - lastTouchAngle;
-      transform.rotation = touchStartTransform.rotation + rotationDelta;
+      // Rotation disabled for the moment 
+      // const rotationDelta = angle - lastTouchAngle;
+      // transform.rotation = touchStartTransform.rotation + rotationDelta;
       
       scheduleRender();
     }
