@@ -1,4 +1,4 @@
-const VERSION = '20260220-5';
+const VERSION = '20260221';
 const CACHE_NAME = 'byom-v1';
 const ASSETS_TO_CACHE = [
   '/byom/',

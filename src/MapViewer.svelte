@@ -252,13 +252,13 @@
         
         ctx.restore();
       } else {
-        ctx.fillStyle = 'rgba(33, 150, 243, 0.7)';
-        ctx.beginPath();
-        ctx.arc(point.imageX, point.imageY, 6, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 2;
-        ctx.stroke();
+        // ctx.fillStyle = 'rgba(33, 150, 243, 0.7)';
+        // ctx.beginPath();
+        // ctx.arc(point.imageX, point.imageY, 6, 0, Math.PI * 2);
+        // ctx.fill();
+        // ctx.strokeStyle = 'white';
+        // ctx.lineWidth = 2;
+        // ctx.stroke();
       }
     });
 
