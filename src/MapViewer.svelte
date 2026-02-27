@@ -304,7 +304,7 @@
         ctx.save();
         ctx.translate(transform.translateX, transform.translateY);
         ctx.rotate(transform.rotation);
-        // ctx.scale(transform.scale, transform.scale); // do not scale point with map
+        ctx.scale(transform.scale, transform.scale);
         ctx.translate(-imageWidth / 2, -imageHeight / 2);
 
         // Draw accuracy circle
@@ -338,7 +338,7 @@
         // Draw user marker
         ctx.fillStyle = '#AF4C50';
         ctx.beginPath();
-        ctx.arc(imgCoords.imageX, imgCoords.imageY, 10, 0, Math.PI * 2);
+        ctx.arc(imgCoords.imageX, imgCoords.imageY, 20, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = 'white';
         ctx.lineWidth = 3;
@@ -347,7 +347,7 @@
         // Draw direction indicator
         ctx.fillStyle = 'white';
         ctx.beginPath();
-        ctx.arc(imgCoords.imageX, imgCoords.imageY, 3, 0, Math.PI * 2);
+        ctx.arc(imgCoords.imageX, imgCoords.imageY, 6, 0, Math.PI * 2);
         ctx.fill();
 
         ctx.restore();
