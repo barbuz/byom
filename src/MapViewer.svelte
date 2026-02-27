@@ -304,7 +304,7 @@
         ctx.save();
         ctx.translate(transform.translateX, transform.translateY);
         ctx.rotate(transform.rotation);
-        ctx.scale(transform.scale, transform.scale);
+        // ctx.scale(transform.scale, transform.scale); // do not scale point with map
         ctx.translate(-imageWidth / 2, -imageHeight / 2);
 
         // Draw accuracy circle
@@ -326,8 +326,8 @@
           
           const accuracyInPixels = accuracyInDegrees * scaleFactor;
           
-          ctx.strokeStyle = 'rgba(76, 175, 80, 0.3)';
-          ctx.fillStyle = 'rgba(76, 175, 80, 0.1)';
+          ctx.strokeStyle = 'rgba(225, 26, 30, 0.3)';
+          ctx.fillStyle = 'rgba(175, 86, 80, 0.1)';
           ctx.lineWidth = 2;
           ctx.beginPath();
           ctx.arc(imgCoords.imageX, imgCoords.imageY, accuracyInPixels, 0, Math.PI * 2);
@@ -336,7 +336,7 @@
         }
 
         // Draw user marker
-        ctx.fillStyle = '#4CAF50';
+        ctx.fillStyle = '#AF4C50';
         ctx.beginPath();
         ctx.arc(imgCoords.imageX, imgCoords.imageY, 10, 0, Math.PI * 2);
         ctx.fill();
