@@ -5,6 +5,7 @@
 
   let maps = [];
   let loading = true;
+  let showUploadMenu = false;
 
   onMount(async () => {
     await loadMaps();
@@ -108,7 +109,30 @@
   function openMap(mapId) {
     window.location.hash = `#map/${mapId}`;
   }
+
+  function handleCameraUpload() {
+    showUploadMenu = false;
+    // Create a temporary input for camera capture
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    input.capture = 'environment';
+    input.onchange = handleFileSelect;
+    input.click();
+  }
+
+  function handleFileUpload() {
+    showUploadMenu = false;
+    // Trigger the regular file input
+    document.getElementById('file-upload').click();
+  }
+
+  function handleClickOutside() {
+    showUploadMenu = false;
+  }
 </script>
+
+<svelte:window on:click={handleClickOutside} on:keydown={(e) => e.key === 'Escape' && handleClickOutside()}/>
 
 <div class="container">
   <header>
@@ -117,15 +141,27 @@
   </header>
 
   <div class="upload-section">
-    <label for="file-upload" class="upload-btn">
-      📷 Add Map
-    </label>
+      <div class="upload-menu-container">
+      <button class="upload-btn" on:click|stopPropagation={() => showUploadMenu = !showUploadMenu}>
+        📷 Add Map
+      </button>
+      
+      {#if showUploadMenu}
+        <div class="upload-menu">
+          <button class="menu-item" on:click|stopPropagation={handleCameraUpload}>
+            📷 Take Photo
+          </button>
+          <button class="menu-item" on:click|stopPropagation={handleFileUpload}>
+            📁 Choose File
+          </button>
+        </div>
+      {/if}
+    </div>
+    
     <input 
       id="file-upload"
       type="file" 
-      accept="image/*" 
-      capture="environment"
-      multiple
+      accept="image/*"
       on:change={handleFileSelect}
       style="display: none;"
     />
@@ -141,7 +177,7 @@
   {:else}
     <div class="maps-grid">
       {#each maps as map (map.id)}
-        <div class="map-card" on:click={() => openMap(map.id)}>
+        <button class="map-card" on:click={() => openMap(map.id)} on:keydown={(e) => e.key === 'Enter' && openMap(map.id)}>
           <div class="map-thumbnail">
             <img src={map.thumbnail} alt={map.name} />
           </div>
@@ -158,7 +194,7 @@
           >
             ×
           </button>
-        </div>
+        </button>
       {/each}
     </div>
   {/if}
