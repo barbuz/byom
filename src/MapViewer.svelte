@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
   import { calculateTransform, geoToImage } from './lib/transforms.js';
+  import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
 
   export let mapId;
@@ -46,11 +47,11 @@
   let mouseStartPos = null;
   let mouseStartTransform = null;
 
-  // GPS state
-  let userPosition = null;
-  let gpsWatchId = null;
+  // Transform state for GPS
   let geoTransform = null;
   let geoTransformType = null;
+  let userPositionMarker;
+
 
   // UI state
   let showingPoints = false;
@@ -77,14 +78,10 @@
   onMount(async () => {
     await loadMapData();
     setupCanvas();
-    startGPSTracking();
     window.addEventListener('resize', handleResize);
   });
 
   onDestroy(() => {
-    if (gpsWatchId !== null) {
-      navigator.geolocation.clearWatch(gpsWatchId);
-    }
     if (imageUrl) {
       URL.revokeObjectURL(imageUrl);
     }
@@ -291,69 +288,9 @@
       ctx.restore();
     }
 
-    // Draw user position
-    if (userPosition && geoTransform) {
-      try {
-        const imgCoords = geoToImage(
-          userPosition.longitude,
-          userPosition.latitude,
-          geoTransform,
-          geoTransformType
-        );
-
-        ctx.save();
-        ctx.translate(transform.translateX, transform.translateY);
-        ctx.rotate(transform.rotation);
-        ctx.scale(transform.scale, transform.scale);
-        ctx.translate(-imageWidth / 2, -imageHeight / 2);
-
-        // Draw accuracy circle
-        if (userPosition.accuracy) {
-          // Rough approximation: 1 degree ≈ 111km
-          const accuracyInDegrees = userPosition.accuracy / 111000;
-          
-          // Use average scale factor from transform coefficients for more accurate representation
-          let scaleFactor;
-          if (geoTransformType === 'affine') {
-            // For affine transform, use average of x and y scale factors
-            const scaleX = Math.sqrt(geoTransform.a * geoTransform.a + geoTransform.d * geoTransform.d);
-            const scaleY = Math.sqrt(geoTransform.b * geoTransform.b + geoTransform.e * geoTransform.e);
-            scaleFactor = (scaleX + scaleY) / 2;
-          } else {
-            // For similarity transform, use the scale factor
-            scaleFactor = geoTransform.scale;
-          }
-          
-          const accuracyInPixels = accuracyInDegrees * scaleFactor;
-          
-          ctx.strokeStyle = 'rgba(225, 26, 30, 0.3)';
-          ctx.fillStyle = 'rgba(175, 86, 80, 0.1)';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(imgCoords.imageX, imgCoords.imageY, accuracyInPixels, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-        }
-
-        // Draw user marker
-        ctx.fillStyle = '#AF4C50';
-        ctx.beginPath();
-        ctx.arc(imgCoords.imageX, imgCoords.imageY, 20, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = 3;
-        ctx.stroke();
-
-        // Draw direction indicator
-        ctx.fillStyle = 'white';
-        ctx.beginPath();
-        ctx.arc(imgCoords.imageX, imgCoords.imageY, 6, 0, Math.PI * 2);
-        ctx.fill();
-
-        ctx.restore();
-      } catch (error) {
-        console.error('Error drawing user position:', error);
-      }
+    // Draw user position marker
+    if (userPositionMarker) {
+      userPositionMarker.drawUserPosition(ctx);
     }
   }
 
@@ -368,31 +305,6 @@
     }
   }
 
-  function startGPSTracking() {
-    if (!navigator.geolocation) {
-      console.warn('Geolocation not supported');
-      return;
-    }
-
-    gpsWatchId = navigator.geolocation.watchPosition(
-      (position) => {
-        userPosition = {
-          latitude: position.coords.latitude,
-          longitude: position.coords.longitude,
-          accuracy: position.coords.accuracy,
-        };
-        scheduleRender();
-      },
-      (error) => {
-        console.error('GPS error:', error);
-      },
-      {
-        enableHighAccuracy: true,
-        maximumAge: 5000,
-        timeout: 10000,
-      }
-    );
-  }
 
   // Touch event handlers
   function handleTouchStart(e) {
@@ -840,9 +752,9 @@
       } else {
         initialZoom = 14; // Tiny area (building level)
       }
-    } else if (userPosition) {
+    } else if (userPositionMarker?.userPosition) {
       // Use current GPS location
-      initialCenter = [userPosition.longitude, userPosition.latitude];
+      initialCenter = [userPositionMarker.userPosition.longitude, userPositionMarker.userPosition.latitude];
       initialZoom = 14; // Street level zoom for GPS location
     }
 
@@ -890,7 +802,7 @@
     });
 
     // Fallback: try to get user's location if we still don't have a good center
-    if (referencePoints.length === 0 && !userPosition && navigator.geolocation) {
+    if (referencePoints.length === 0 && !userPositionMarker?.userPosition && navigator.geolocation) {
       navigator.geolocation.getCurrentPosition(
         (position) => {
           osmMap.setCenter([position.coords.longitude, position.coords.latitude]);
@@ -931,6 +843,16 @@
 </script>
 
 <div class="viewer-container">
+  <UserPositionMarker
+    bind:this={userPositionMarker}
+    {geoTransform}
+    {geoTransformType}
+    {transform}
+    {imageWidth}
+    {imageHeight}
+    scheduleRender={scheduleRender}
+  />
+  
   <canvas
     bind:this={canvas}
     on:touchstart={handleTouchStart}
@@ -1042,22 +964,22 @@
         
         <div class="debug-section">
           <h3>Current GPS Position</h3>
-          {#if userPosition}
+          {#if userPositionMarker?.userPosition}
             <div class="debug-info">
               <div class="info-row">
                 <strong>Latitude:</strong>
-                <span>{userPosition.latitude.toFixed(6)}</span>
+                <span>{userPositionMarker.userPosition.latitude.toFixed(6)}</span>
               </div>
               <div class="info-row">
                 <strong>Longitude:</strong>
-                <span>{userPosition.longitude.toFixed(6)}</span>
+                <span>{userPositionMarker.userPosition.longitude.toFixed(6)}</span>
               </div>
               <div class="info-row">
                 <strong>Accuracy:</strong>
-                <span>{userPosition.accuracy?.toFixed(0)}m</span>
+                <span>{userPositionMarker.userPosition.accuracy?.toFixed(0)}m</span>
               </div>
               {#if geoTransform}
-                {@const imgCoords = geoToImage(userPosition.longitude, userPosition.latitude, geoTransform, geoTransformType)}
+                {@const imgCoords = geoToImage(userPositionMarker.userPosition.longitude, userPositionMarker.userPosition.latitude, geoTransform, geoTransformType)}
                 <div class="info-row">
                   <strong>Image Coordinates:</strong>
                   <span>({imgCoords.imageX.toFixed(1)}, {imgCoords.imageY.toFixed(1)})</span>
