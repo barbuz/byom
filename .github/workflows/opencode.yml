@@ -27,6 +27,6 @@ jobs:
       - name: Run OpenCode
         uses: anomalyco/opencode/github@latest
         env:
-          GEMINI_API_KEY: ${{ secrets.LLM_API_KEY }}
+          GOOGLE_GENERATIVE_AI_API_KEY: ${{ secrets.LLM_API_KEY }}
         with:
           model: google/gemini-2.5-flash
