@@ -18,11 +18,17 @@ permissions:
 
 jobs:
   call-openhands-resolver:
-    uses: All-Hands-AI/OpenHands/.github/workflows/openhands-resolver.yml@main
+    if: |
+      github.event.sender.login == 'barbuz' &&
+      (
+        github.event.label.name == 'fix-me' ||
+        contains(github.event.comment.body, '@openhands-agent') ||
+        contains(github.event.review.body, '@openhands-agent')
+      )
+    uses: OpenHands/OpenHands/.github/workflows/openhands-resolver.yml@main
     with:
       macro: ${{ vars.OPENHANDS_MACRO || '@openhands-agent' }}
-      max_iterations: ${{ fromJson(vars.OPENHANDS_MAX_ITER || 50) }}
-      LLM_MODEL: ${{ vars.LLM_MODEL || 'gemini/gemini-2.5-flash' }}
-      target_branch: ${{ vars.TARGET_BRANCH || 'main' }}
+      max_iterations: ${{ fromJson(vars.OPENHANDS_MAX_ITER || 30) }}
     secrets:
+      LLM_MODEL: ${{ secrets.LLM_MODEL }}
       LLM_API_KEY: ${{ secrets.LLM_API_KEY }}
