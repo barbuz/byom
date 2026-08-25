@@ -1,7 +1,7 @@
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
-  import { calculateTransform, geoToImage } from './lib/transforms.js';
+  import { calculateTransform, geoToImage, geoDistanceToImagePixels } from './lib/transforms.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
 
@@ -67,6 +67,7 @@
   let gpsError = null;
   let selectedLon = null;
   let selectedLat = null;
+  let selectedAccuracy = null;
   let mapContainer;
   let osmMap;
   let osmMapMarker = null;
@@ -219,6 +220,24 @@
       const isEditing = editingPoint && editingPoint.id === point.id;
       
       if (showingPoints || isEditing) {
+        // Draw accuracy ring if the point was captured with GPS accuracy
+        if (point.accuracy && geoTransform) {
+          const accuracyRadius = geoDistanceToImagePixels(
+            point.lon,
+            point.lat,
+            point.accuracy,
+            geoTransform,
+            geoTransformType
+          );
+          ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
+          ctx.strokeStyle = 'rgba(33, 150, 243, 0.35)';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          ctx.arc(point.imageX, point.imageY, accuracyRadius, 0, Math.PI * 2);
+          ctx.fill();
+          ctx.stroke();
+        }
+
         ctx.fillStyle = isEditing ? 'rgba(255, 152, 0, 0.9)' : isHovered ? 'rgba(33, 150, 243, 0.9)' : 'rgba(33, 150, 243, 0.7)';
         ctx.beginPath();
         ctx.arc(point.imageX, point.imageY, isHovered || isEditing ? 12 : 8, 0, Math.PI * 2);
@@ -633,6 +652,7 @@
     coordinateMethod = null;
     selectedLon = null;
     selectedLat = null;
+    selectedAccuracy = null;
     manualLat = '';
     manualLon = '';
     gpsPosition = null;
@@ -668,9 +688,11 @@
         gpsPosition = {
           lat: position.coords.latitude,
           lon: position.coords.longitude,
+          accuracy: position.coords.accuracy,
         };
         selectedLat = gpsPosition.lat;
         selectedLon = gpsPosition.lon;
+        selectedAccuracy = gpsPosition.accuracy;
       },
       (error) => {
         gpsError = `GPS error: ${error.message}`;
@@ -704,6 +726,7 @@
     
     selectedLat = lat;
     selectedLon = lon;
+    selectedAccuracy = null;
   }
 
   async function initMap() {
@@ -790,6 +813,7 @@
       const { lng, lat } = e.lngLat;
       selectedLon = lng;
       selectedLat = lat;
+      selectedAccuracy = null;
 
       // Add/update marker
       if (osmMapMarker) {
@@ -826,6 +850,7 @@
         imageY: pendingReferencePoint.imageY,
         lon: selectedLon,
         lat: selectedLat,
+        accuracy: selectedAccuracy,
       });
 
       hideCoordinateSelection();
@@ -1024,6 +1049,12 @@
                     <strong>Image:</strong>
                     <span>({point.imageX.toFixed(1)}, {point.imageY.toFixed(1)})</span>
                   </div>
+                  {#if point.accuracy}
+                    <div class="info-row">
+                      <strong>Accuracy:</strong>
+                      <span>±{point.accuracy.toFixed(0)}m</span>
+                    </div>
+                  {/if}
                 </div>
               {/each}
             </div>
@@ -1114,6 +1145,10 @@
                 <div class="coords-display">
                   Lat: {gpsPosition.lat.toFixed(6)}<br>
                   Lon: {gpsPosition.lon.toFixed(6)}
+                  {#if gpsPosition.accuracy}
+                    <br>
+                    Accuracy: ±{gpsPosition.accuracy.toFixed(0)}m
+                  {/if}
                 </div>
               </div>
             {:else}
