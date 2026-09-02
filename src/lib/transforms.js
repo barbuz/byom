@@ -152,6 +152,25 @@ export function geoToImage(lon, lat, transform, type) {
 }
 
 /**
+ * Convert a ground distance in meters to an image-space distance in pixels.
+ * Adds an offset of `meters` meters to the given geographic location,
+ * transforms both locations to image space, and measures the pixel distance.
+ * @param {number} lon
+ * @param {number} lat
+ * @param {number} meters
+ * @param {Object} transform - Transform parameters
+ * @param {string} type - 'similarity' or 'affine'
+ * @returns {number} Distance in image pixels
+ */
+export function geoDistanceToImagePixels(lon, lat, meters, transform, type) {
+  // 1 degree of latitude ≈ 111320 meters everywhere on Earth
+  const offsetLat = lat + meters / 111320;
+  const start = geoToImage(lon, lat, transform, type);
+  const end = geoToImage(lon, offsetLat, transform, type);
+  return Math.hypot(end.imageX - start.imageX, end.imageY - start.imageY);
+}
+
+/**
  * Calculate the appropriate transform based on number of reference points
  * @param {Array} referencePoints 
  * @returns {Object} {transform, type} or null if insufficient points

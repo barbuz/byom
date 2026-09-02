@@ -137,7 +137,7 @@ export async function deleteMap(mapId) {
 
 /**
  * Add a reference point to a map
- * @param {Object} pointData - { mapId, imageX, imageY, lon, lat }
+ * @param {Object} pointData - { mapId, imageX, imageY, lon, lat, accuracy }
  * @returns {Promise<number>} The ID of the newly created point
  */
 export async function addReferencePoint(pointData) {
@@ -152,6 +152,7 @@ export async function addReferencePoint(pointData) {
       imageY: pointData.imageY,
       lon: pointData.lon,
       lat: pointData.lat,
+      accuracy: pointData.accuracy || null,
       timestamp: Date.now(),
     };
 
