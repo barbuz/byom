@@ -68,24 +68,23 @@ export function computeAffineTransform(referencePoints) {
   const imageTriangle = referencePoints.slice(0, 3).map(p => [p.imageX, p.imageY]);
   const geoTriangle = referencePoints.slice(0, 3).map(p => [p.lon, p.lat]);
   
-  try {
-    // Compute the affine transformation matrix
-    const matrix = fromTriangles(imageTriangle, geoTriangle);
-    
-    // Extract coefficients from the matrix
-    // The matrix format is: [a, b, 0, c, d, 0, e, f, 1]
-    // But transformation-matrix uses: [a, c, e, b, d, f, 0, 0, 1]
-    return {
-      a: matrix.a,
-      b: matrix.c,
-      c: matrix.e,
-      d: matrix.b, 
-      e: matrix.d,
-      f: matrix.f
-    };
-  } catch (error) {
+  const matrix = fromTriangles(imageTriangle, geoTriangle);
+
+  if ([matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f].some(value => !Number.isFinite(value))) {
     throw new Error('Points are collinear, cannot compute affine transform');
   }
+
+  // Extract coefficients from the matrix
+  // The matrix format is: [a, b,  0, c, d,  0, e, f,  1]
+  // But transformation-matrix uses: [a, c, e, b, d, f,  0,  0,  1]
+  return {
+    a: matrix.a,
+    b: matrix.c,
+    c: matrix.e,
+    d: matrix.b,
+    e: matrix.d,
+    f: matrix.f
+  };
 }
 
 /**
@@ -140,7 +139,7 @@ export function geoToImage(lon, lat, transform, type) {
     const matrix = { a, b: d, c: b, d: e, e: c, f };
     const inverseMatrix = inverse(matrix);
     
-    if (!inverseMatrix) {
+    if (!inverseMatrix || ![inverseMatrix.a, inverseMatrix.b, inverseMatrix.c, inverseMatrix.d, inverseMatrix.e, inverseMatrix.f].every(Number.isFinite)) {
       throw new Error('Transform is singular');
     }
     
