@@ -128,7 +128,7 @@ export function getCtxCalls() {
 
 // Fake Image class. jsdom Image never fires load; this fake lets
 // tests set dimensions and trigger onload manually (loads async).
-class FakeImage {
+export class FakeImage {
   constructor() {
     this.width = 0;
     this.height =  0;
@@ -221,8 +221,18 @@ export async function flushPromises() {
   await new Promise(resolve => setTimeout(resolve, 0));
 } 
 
+let objectUrlCounter = 0;
+const originalCreateObjectURL = URL.createObjectURL;
+
 beforeEach(() => {
   const resetCanvas = installCanvasStub();
+
+  // jsdom has no URL.createObjectURL; provide a stable fake so MapViewer
+  // can create/revoke blob URLs without relying on real browser APIs.
+  if (!URL.createObjectURL) {
+    URL.createObjectURL = vi.fn(() => `blob:mock-${++objectUrlCounter}`);
+    URL.revokeObjectURL = vi.fn();
+  }
 
   // Reset DOM
   document.body.innerHTML = "";
@@ -247,6 +257,11 @@ afterEach(() => {
   if (window.alert && window.alert.mockRestore) {
     window.alert.mockRestore();
   }
+  if (originalCreateObjectURL) {
+    URL.createObjectURL = originalCreateObjectURL;
+    URL.revokeObjectURL = originalCreateObjectURL;
+  }
+
   delete globalThis.__geolocationTestUtil;
 
   globalThis.__canvasTestUtil = null;

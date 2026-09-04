@@ -1,3 +1,5 @@
+<svelte:options accessors />
+
 <script>
   import { onMount, onDestroy } from 'svelte';
   import { geoToImage, geoDistanceToImagePixels } from '../lib/transforms.js';
