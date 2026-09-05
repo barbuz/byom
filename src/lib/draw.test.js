@@ -57,6 +57,41 @@ describe('drawReferencePoints', () => {
     drawReferencePoints(ctx, [{ id:  1, imageX:  10, imageY:  10 }], { scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80, { showingPoints:  1, editingPointId:  1 });
     expect(ctx.fs).toBe('white');
    });
+
+ it('draws an accuracy ring when the point has accuracy and a geo transform', () => {
+    const ctx = fakeCtx();
+    drawReferencePoints(
+      ctx,
+      [{ id:  1, imageX:  10, imageY:  10, lon:  1, lat:  2, accuracy:  100 }],
+      { scale:  2, rotation:  0.5, translateX:  0, translateY:  0 },
+      100,
+      80,
+      { showingPoints:  true, geoTransform: { scale:  1, rotation:  0, tx:  0, ty:  0 }, geoTransformType: 'similarity' }
+    );
+    const arcs = ctx.calls.filter(c => c[0] === 'arc');
+    expect(arcs.length).toBeGreaterThanOrEqual(2);
+    expect(arcs[0][1][2]).toBeGreaterThan(0);
+    expect(arcs[0][1][2]).toBeLessThan(arcs[1][1][2]);
+   });
+});
+
+describe('drawUserMarker error path', () => {
+  it('logs and swallows errors when the geo transform cannot be inverted', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const ctx = fakeCtx();
+    drawUserMarker(
+      ctx,
+      { longitude:  0, latitude:  0, accuracy:  0 },
+      { a:  1, b:  2, c:  3, d:  1, e:  2, f:  3 },
+      'affine',
+      { scale:  1, rotation:  0, translateX:  0, translateY:  0 },
+      100,
+      80
+    );
+    expect(errorSpy).toHaveBeenCalledTimes(1);
+    expect(ctx.calls.filter(c => c[0] === 'arc')).toHaveLength(0);
+    errorSpy.mockRestore();
+   });
 });
 
 describe('drawUserMarker', () => {

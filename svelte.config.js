@@ -1,3 +1,4 @@
+/* v8 ignore start -- build-time config, not exercised by unit tests */
 import { vitePreprocess } from '@sveltejs/vite-plugin-svelte';
 
 export default {
@@ -5,3 +6,4 @@ export default {
   // for more information about preprocessors
   preprocess: vitePreprocess(),
 };
+/* v8 ignore stop */

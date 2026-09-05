@@ -11,6 +11,8 @@ import {
 } from "../../lib/db.js";
 import assert from "node:assert/strict";
 
+const maplibreState = vi.hoisted(() => ({ maps: [], markers: [] }));
+
 vi.mock("../../lib/db.js", () => ({
   getMap: vi.fn(),
   getReferencePoints: vi.fn(),
@@ -18,6 +20,40 @@ vi.mock("../../lib/db.js", () => ({
   updateReferencePoint: vi.fn(),
   deleteReferencePoint: vi.fn(),
 }));
+
+const mockMapClasses = () => ({
+  Map: class {
+    constructor(options) {
+      this.options = options;
+      this.handlers = {};
+      maplibreState.maps.push(this);
+    }
+    on(event, cb) {
+      this.handlers[event] = cb;
+      return this;
+    }
+    setCenter() { return this; }
+    setZoom() { return this; }
+  },
+  Marker: class {
+    constructor() {
+      maplibreState.markers.push(this);
+    }
+    setLngLat(lngLat) {
+      this.lngLat = lngLat;
+      return this;
+    }
+    addTo() { return this; }
+  },
+});
+
+vi.mock("maplibre-gl", () => {
+  const classes = mockMapClasses();
+  return {
+    ...classes,
+    default: classes,
+  };
+});
 
 class MapImage extends FakeImage {
   constructor() {
@@ -72,6 +108,50 @@ beforeEach(() => {
 });
 
 describe("MapViewer GPS flows", () => {
+  it("selects coordinates on the OSM map using the maplibre mock", async () => {
+    maplibreState.maps.length = 0;
+    maplibreState.markers.length = 0;
+
+    await mountViewer();
+    clickCanvasAt(512, 384);
+    await sleep(120);
+    fireEvent.click(await screen.findByRole("button", { name: /Select on Map/ }));
+    await sleep(180);
+
+    await screen.findByText("Click on the map to select coordinates");
+    assert.equal(maplibreState.maps.length, 1);
+
+    const map = maplibreState.maps[0];
+    map.handlers.click({ lngLat: { lng: -74.006, lat: 40.7128 } });
+    await flushPromises();
+
+    await screen.findByText(/Selected: 40.712800, -74.006000/);
+    assert.equal(maplibreState.markers.length, 1);
+
+    map.handlers.click({ lngLat: { lng: -73.99, lat: 40.71 } });
+    await flushPromises();
+    await screen.findByText(/Selected: 40.710000, -73.990000/);
+    assert.equal(maplibreState.markers.length, 1);
+   });
+
+  it("centers the OSM map on reference points when selecting on map", async () => {
+    maplibreState.maps.length = 0;
+    maplibreState.markers.length = 0;
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+
+    await mountViewer();
+    clickCanvasAt(512, 384);
+    await sleep(120);
+    fireEvent.click(await screen.findByRole("button", { name: /Select on Map/ }));
+    await sleep(180);
+
+    const map = maplibreState.maps[0];
+    assert.ok(map.options.center.length === 2);
+    assert.ok(Math.abs(map.options.center[0] + 73.5) < 0.001);
+    assert.ok(Math.abs(map.options.center[1] - 40.5) < 0.001);
+   assert.equal(map.options.zoom, 10);
+   });
+
   it("uses GPS: records options, success enables Save with the selection", async () => {
     const gpsOptions = [];
     const geo = navigator.geolocation;

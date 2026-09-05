@@ -1,3 +1,4 @@
+/* v8 ignore start -- service worker runs in the browser, not in jsdom */
 const VERSION = '20260825-1';
 const CACHE_NAME = 'byom-v1';
 const ASSETS_TO_CACHE = [
@@ -68,3 +69,4 @@ self.addEventListener('fetch', (event) => {
     })
   );
 });
+/* v8 ignore stop */

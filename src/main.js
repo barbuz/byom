@@ -1,3 +1,4 @@
+/* v8 ignore start -- app bootstrap and PWA registration are browser-only */
 import './styles/App.css';
 import App from './App.svelte';
 
@@ -19,3 +20,4 @@ if ('serviceWorker' in navigator) {
       });
   });
 }
+/* v8 ignore stop */
