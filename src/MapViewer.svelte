@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
   import { calculateTransform, geoToImage, geoDistanceToImagePixels } from './lib/transforms.js';
+  import { screenToImage, getPointAtScreen, pinchZoomTransform } from './lib/viewport.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
 
@@ -150,38 +151,6 @@
     transform.scale = Math.min(scaleX, scaleY) * 0.9;
     transform.translateX = canvasWidth / 2;
     transform.translateY = canvasHeight / 2;
-  }
-
-  function getPointAtScreen(screenX, screenY) {
-    if (!showingPoints) return -1;
-    
-    const clickRadius = 20;
-    
-    for (let i = 0; i < referencePoints.length; i++) {
-      const point = referencePoints[i];
-      
-      const cos_r = Math.cos(transform.rotation);
-      const sin_r = Math.sin(transform.rotation);
-      
-      // Account for image centering offset
-      const offsetX = point.imageX - imageWidth / 2;
-      const offsetY = point.imageY - imageHeight / 2;
-      
-      const scaledX = offsetX * transform.scale;
-      const scaledY = offsetY * transform.scale;
-      
-      const rotatedX = cos_r * scaledX - sin_r * scaledY;
-      const rotatedY = sin_r * scaledX + cos_r * scaledY;
-      
-      const screenPointX = rotatedX + transform.translateX;
-      const screenPointY = rotatedY + transform.translateY;
-      
-      const dist = Math.hypot(screenX - screenPointX, screenY - screenPointY);
-      
-      if (dist <= clickRadius) return i;
-    }
-    
-    return -1;
   }
 
   function scheduleRender() {
@@ -415,24 +384,13 @@
       const scaleFactor = distance / lastTouchDistance;
       const newScale = touchStartTransform.scale * scaleFactor;
       const clampedScale = Math.max(0.1, Math.min(10, newScale));
-      
-      // Calculate zoom center adjustment
-      // We want to zoom around the current pinch center, not the image center
-      const scaleChange = clampedScale / touchStartTransform.scale;
-      
-      // Adjust translation to keep the pinch center fixed during zoom
-      const pinchCenterOffsetX = center.x - touchStartTransform.translateX;
-      const pinchCenterOffsetY = center.y - touchStartTransform.translateY;
-      
-      // Apply the scale change to the offset
-      const scaledOffsetX = pinchCenterOffsetX * scaleChange;
-      const scaledOffsetY = pinchCenterOffsetY * scaleChange;
-      
-      // Calculate new translation to keep pinch center fixed
-      transform.translateX = center.x - scaledOffsetX;
-      transform.translateY = center.y - scaledOffsetY;
-      transform.scale = clampedScale;
-      
+
+      // Zoom around the current pinch center keeping it fixed
+      const zoomed = pinchZoomTransform(center, touchStartTransform, clampedScale);
+      transform.translateX = zoomed.translateX;
+      transform.translateY = zoomed.translateY;
+      transform.scale = zoomed.scale;
+
       // Rotation disabled for the moment 
       // const rotationDelta = angle - lastTouchAngle;
       // transform.rotation = touchStartTransform.rotation + rotationDelta;
@@ -461,7 +419,7 @@
 
   function handleLongPress(screenX, screenY) {
     // Convert screen coordinates to image coordinates
-    const imageCoords = screenToImage(screenX, screenY);
+    const imageCoords = screenToImage(screenX, screenY, transform, imageWidth, imageHeight);
     
     if (imageCoords) {
       pendingReferencePoint = {
@@ -484,39 +442,12 @@
   function handlePointEditing(screenX, screenY) {
     if (!showingPoints) return;
     
-    const pointIndex = getPointAtScreen(screenX, screenY);
+    const pointIndex = getPointAtScreen(screenX, screenY, referencePoints, transform, imageWidth, imageHeight);
     
     if (pointIndex >= 0) {
       editingPoint = { ...referencePoints[pointIndex], index: pointIndex };
       scheduleRender();
     }
-  }
-
-  function screenToImage(screenX, screenY) {
-    if (!imageWidth || !imageHeight) return null;
-    
-    // Apply inverse transformations to get image coordinates
-    const cos_r = Math.cos(-transform.rotation);
-    const sin_r = Math.sin(-transform.rotation);
-    
-    // Translate to origin
-    let x = screenX - transform.translateX;
-    let y = screenY - transform.translateY;
-    
-    // Apply inverse rotation
-    const rotatedX = cos_r * x - sin_r * y;
-    const rotatedY = sin_r * x + cos_r * y;
-    
-    // Apply inverse scale and translate to image coordinates
-    const imageX = (rotatedX / transform.scale) + (imageWidth / 2);
-    const imageY = (rotatedY / transform.scale) + (imageHeight / 2);
-    
-    // Check if coordinates are within image bounds
-    if (imageX >= 0 && imageX <= imageWidth && imageY >= 0 && imageY <= imageHeight) {
-      return { x: imageX, y: imageY };
-    }
-    
-    return null;
   }
 
   function handleCanvasClick(e) {
@@ -540,7 +471,7 @@
     
     // Handle hover effects for points
     if (showingPoints) {
-      const pointIndex = getPointAtScreen(x, y);
+      const pointIndex = getPointAtScreen(x, y, referencePoints, transform, imageWidth, imageHeight);
       
       if (pointIndex !== hoverPointIndex) {
         hoverPointIndex = pointIndex;
