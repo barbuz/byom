@@ -151,6 +151,7 @@ describe('computeAffineTransform round-trip', () => {
 describe('imageToGeo and geoToImage error cases', () => {
   it('throws on unknown transform type', () => {
     const t = { a: 1 };
+    expect(() => imageToGeo(0, 0, t, 'bogus')).toThrow('Unknown transform type');
     expect(() => geoToImage(0, 0, t, 'bogus')).toThrow('Unknown transform type');
   });
 

@@ -246,6 +246,22 @@ npm run deploy
 - Ensure `touch-action: none` on canvas
 - Check for event.preventDefault() calls
 
+## Tests
+
+Run the test suite (unit tests for the lib, mocked component flows, and the test harness mocks):
+
+```bash
+npm test
+```
+
+Run tests with coverage (enforces per-file line-coverage thresholds configured in `vitest.config.js`):
+
+```bash
+npm run test:coverage
+```
+
+The mocking strategy (canvas stub, fake `Image`, geolocation, maplibre, fake-indexeddb) is documented in the **Testing** section of [README.md](README.md).
+
 ## Next Steps
 
 1. ✅ Install dependencies: `npm install`
