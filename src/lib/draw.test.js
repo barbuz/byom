@@ -7,7 +7,7 @@ import {
 } from './draw.js';
 
 function fakeCtx() {
-  return { calls: [], translate(...a) { this.calls.push(['translate', a]); }, rotate(...a) { this.calls.push(['rotate', a]); }, scale(...a) { this.calls.push(['scale', a]); }, arc(...a) { this.calls.push(['arc', a]); }, fill() { this.calls.push(['fill']); }, stroke() { this.calls.push(['stroke']); }, beginPath() { this.calls.push(['beginPath']); }, save() { this.calls.push(['save']); }, restore() { this.calls.push(['restore']); }, measureText(t) { this.calls.push(['measureText', t]); return { width: 30 }; }, fillRect(...a) { this.calls.push(['fillRect', a]); }, fillText(...a) { this.calls.push(['fillText', a]); }, set fillStyle(v) { this.fs = v; }, get fillStyle() { return this.fs; }, set strokeStyle(v) { this.ss = v; }, get strokeStyle() { return this.ss; }, set lineWidth(v) { this.lw = v; }, get lineWidth() { return this.lw; }, set font(v) { this.fn = v; }, get font() { return this.fn; }, set textAlign(v) { this.ta = v; }, get textAlign() { return this.ta; }, set textBaseline(v) { this.tb = v; }, get textBaseline() { return this.tb; }, };
+  return { calls: [], translate(...a) { this.calls.push(['translate', a]); }, rotate(...a) { this.calls.push(['rotate', a]); }, scale(...a) { this.calls.push(['scale', a]); }, arc(...a) { this.calls.push(['arc', a]); }, fill() { this.calls.push(['fill']); }, stroke() { this.calls.push(['stroke']); }, beginPath() { this.calls.push(['beginPath']); }, save() { this.calls.push(['save']); }, restore() { this.calls.push(['restore']); }, measureText(t) { this.calls.push(['measureText', t]); return { width: 30 }; }, fillRect(...a) { this.calls.push(['fillRect', a]); }, fillText(...a) { this.calls.push(['fillText', a]); }, set fillStyle(v) { this.fs = v; this.calls.push(['fillStyle', v]); }, get fillStyle() { return this.fs; }, set strokeStyle(v) { this.ss = v; this.calls.push(['strokeStyle', v]); }, get strokeStyle() { return this.ss; }, set lineWidth(v) { this.lw = v; }, get lineWidth() { return this.lw; }, set font(v) { this.fn = v; }, get font() { return this.fn; }, set textAlign(v) { this.ta = v; }, get textAlign() { return this.ta; }, set textBaseline(v) { this.tb = v; }, get textBaseline() { return this.tb; }, };
 }
 
 describe('applyImageTransform', () => {
@@ -73,6 +73,22 @@ describe('drawReferencePoints', () => {
     expect(arcs[0][1][2]).toBeGreaterThan(0);
     expect(arcs[0][1][2]).toBeLessThan(arcs[1][1][2]);
    });
+
+  it('draws the accuracy ring with translucent rgba colors', () => {
+    const ctx = fakeCtx();
+    drawReferencePoints(
+      ctx,
+      [{ id: 1, imageX: 10, imageY: 10, lon: 1, lat: 2, accuracy: 100 }],
+      { scale: 2, rotation: 0.5, translateX: 0, translateY: 0 },
+      100,
+      80,
+      { showingPoints: true, geoTransform: { scale: 1, rotation: 0, tx: 0, ty: 0 }, geoTransformType: 'similarity' }
+    );
+    const fs = ctx.calls.filter(c => c[0] === 'fillStyle');
+    const ss = ctx.calls.filter(c => c[0] === 'strokeStyle');
+    expect(fs[0][1]).toMatch(/^rgba\(33,\s*150,\s*243,\s*0\.1\)$/);
+    expect(ss[0][1]).toMatch(/^rgba\(33,\s*150,\s*243,\s*0\.35\)$/);
+  });
 });
 
 describe('drawUserMarker error path', () => {
@@ -105,8 +121,12 @@ describe('drawUserMarker', () => {
  it('draws position marker when geoTransform is provided', () => {
     const ctx = fakeCtx();
     const geoTransform = { scale:  1, rotation:  0, tx:  0, ty:  0 };
-    drawUserMarker(ctx, { longitude:  0, latitude:  0, accuracy:  0 },  geoTransform, 'similarity',{ scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80);
+    drawUserMarker(ctx, { longitude:  0, latitude:  0, accuracy:  5 },  geoTransform, 'similarity',{ scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80);
     expect(ctx.calls.filter(c => c[0] === 'arc').length).toBeGreaterThanOrEqual(1);
     expect(ctx.calls.filter(c => c[0] === 'restore')).toHaveLength(1);
+    const ss = ctx.calls.filter(c => c[0] === 'strokeStyle');
+    const fs = ctx.calls.filter(c => c[0] === 'fillStyle');
+    expect(ss[0][1]).toMatch(/^rgba\(175,\s*76,\s*80,\s*0\.4\)$/);
+    expect(fs[0][1]).toMatch(/^rgba\(175,\s*76,\s*80,\s*0\.15\)$/);
    });
 });
