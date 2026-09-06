@@ -9,8 +9,8 @@ export function applyImageTransform(ctx, transform, imageWidth, imageHeight) {
 
 function drawAccuracyRing(ctx, point, geoTransform, geoTransformType) {
   const accuracyRadius = geoDistanceToImagePixels(point.lon, point.lat, point.accuracy, geoTransform, geoTransformType);
-  ctx.fillStyle = 'rgba(33, 150, 0.1)';
-  ctx.strokeStyle = 'rgba(33, 150, 0.35)';
+  ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
+  ctx.strokeStyle = 'rgba(33, 150, 243, 0.35)';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(point.imageX, point.imageY, accuracyRadius, 0, Math.PI * 2);
@@ -31,7 +31,7 @@ export function drawReferencePoints(ctx, points, transform, imageWidth, imageHei
       drawAccuracyRing(ctx, point, geoTransform, geoTransformType);
     }
 
-    ctx.fillStyle = isEditing ? 'rgba(255, 152,	0.9)' : isHovered ? 'rgba(33, 150,	0.9)' : 'rgba(33, 150,	0.7)';
+    ctx.fillStyle = isEditing ? 'rgba(255, 152, 0, 0.9)' : isHovered ? 'rgba(33, 150, 243, 0.9)' : 'rgba(33, 150, 243, 0.7)';
     ctx.beginPath();
     ctx.arc(point.imageX, point.imageY, isHovered ||	isEditing ?	 12 :	 8,	0, Math.PI *	 2);
     ctx.fill();
@@ -63,7 +63,7 @@ export function drawReferencePoints(ctx, points, transform, imageWidth, imageHei
 }
 
 export function drawPendingPoint(ctx, pendingPoint, transform, imageWidth, imageHeight) {
-  ctx.fillStyle =	'rgba(255,	 152,	 0.9)';
+  ctx.fillStyle =	'rgba(255, 152, 0, 0.9)';
   ctx.beginPath();
   ctx.arc(pendingPoint.imageX, pendingPoint.imageY,	 15,	0, Math.PI *	 2);
    ctx.fill();
@@ -71,7 +71,7 @@ export function drawPendingPoint(ctx, pendingPoint, transform, imageWidth, image
    ctx.lineWidth =	3;
    ctx.stroke();
 
-   ctx.strokeStyle =	'rgba(255,	 152,	 0.5)';
+   ctx.strokeStyle =	'rgba(255, 152, 0, 0.5)';
   ctx.lineWidth =	2;
   ctx.beginPath();
   ctx.arc(pendingPoint.imageX, pendingPoint.imageY,	 20,	0, Math.PI *	 2);
@@ -90,8 +90,8 @@ export function drawUserMarker(ctx, position, geoTransform, geoTransformType, tr
     if (position.accuracy) {
       const accuracyInPixels =	geoDistanceToImagePixels(position.longitude, position.latitude, position.accuracy, geoTransform, geoTransformType);
 
-      ctx.strokeStyle =	'rgba(175,	 76,	 0.4)';
-      ctx.fillStyle =	'rgba(175,	 76,	 0.15)';
+      ctx.strokeStyle =	'rgba(175, 76, 80, 0.4)';
+      ctx.fillStyle =	'rgba(175, 76, 80, 0.15)';
       ctx.lineWidth =	2;
       ctx.beginPath();
       ctx.arc(imgCoords.imageX, imgCoords.imageY, accuracyInPixels,	0, Math.PI *	 2);
