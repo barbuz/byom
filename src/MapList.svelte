@@ -177,7 +177,19 @@
   {:else}
     <div class="maps-grid">
       {#each maps as map (map.id)}
-        <button class="map-card" on:click={() => openMap(map.id)} on:keydown={(e) => e.key === 'Enter' && openMap(map.id)}>
+        <div
+            class="map-card"
+            role="button"
+            tabindex="0"
+            aria-label={`Open map ${map.name}`}
+            on:click={() => openMap(map.id)}
+            on:keydown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                openMap(map.id);
+              }
+            }}
+          >
           <div class="map-thumbnail">
             <img src={map.thumbnail} alt={map.name} />
           </div>
@@ -189,13 +201,13 @@
           </div>
           <button 
             class="delete-btn" 
-            on:click={(e) => handleDeleteMap(map.id, e)}
+            on:click|stopPropagation={(e) => handleDeleteMap(map.id, e)}
             aria-label="Delete map"
           >
             ×
           </button>
-        </button>
-      {/each}
+          </div>
+        {/each}
     </div>
   {/if}
 </div>

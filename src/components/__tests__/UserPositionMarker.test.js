@@ -67,8 +67,7 @@ describe("UserPositionMarker", () => {
     const component = result.component;
     emitPosition({ latitude:   12.3, longitude:   45.6, accuracy:   7.8 });
     await flushPromises();
-    const state = component.$capture_state();
-    const position = state.userPosition;
+    const position = component.userPosition;
     assert.equal(position.latitude, 12.3);
     assert.equal(position.longitude, 45.6);
     assert.equal(position.accuracy, 7.8);
@@ -76,13 +75,13 @@ describe("UserPositionMarker", () => {
     assert.equal(calls.length, 1);
   });
 
-  it("clears the watch on destroy", () => {
+  it("clears the watch on destroy", async () => {
     const scheduleRender = vi.fn();
     const result = render(UserPositionMarker, { props: { scheduleRender } });
     const component = result.component;
     const before = watchCount();
     assert.equal(before, 1);
-    component.$destroy();
+    result.unmount();
     const after = watchCount();
     assert.equal(after, 0);
   });
@@ -129,8 +128,7 @@ describe("UserPositionMarker", () => {
   it("draws nothing when there is no position", () => {
     const result = render(UserPositionMarker);
     const component = result.component;
-    const state = component.$capture_state();
-    const position = state.userPosition;
+    const position = component.userPosition;
     assert.equal(position, null);
     const canvas = document.createElement("canvas");
     const ctx = canvas.getContext("2d");
