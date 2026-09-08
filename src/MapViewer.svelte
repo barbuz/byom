@@ -867,8 +867,8 @@
   {/if}
 
   {#if editingPoint}
-    <div class="modal-overlay" role="dialog" aria-modal="true" on:click={cancelEdit} on:keydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}>
-      <div class="modal-content" on:click|stopPropagation>
+    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" on:click={(e) => { if (e.target === e.currentTarget) cancelEdit(); }} on:keydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}>
+      <div class="modal-content">
         <h2>Edit Point #{editingPoint.index + 1}</h2>
         
         <div class="point-edit-info">
@@ -914,8 +914,8 @@
   {/if}
 
   {#if showingDebug}
-    <div class="modal-overlay" role="dialog" aria-modal="true" on:click={toggleDebug} on:keydown={(e) => { if (e.key === 'Escape') toggleDebug(); }}>
-      <div class="modal-content debug-modal" on:click|stopPropagation>
+    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" on:click={(e) => { if (e.target === e.currentTarget) toggleDebug(); }} on:keydown={(e) => { if (e.key === 'Escape') toggleDebug(); }}>
+      <div class="modal-content debug-modal">
         <h2>🐛 Debug Information</h2>
         
         <div class="debug-section">
@@ -1032,8 +1032,8 @@
   {/if}
 
   {#if showingCoordinateSelection}
-    <div class="modal-overlay" role="dialog" aria-modal="true" on:click={hideCoordinateSelection} on:keydown={(e) => { if (e.key === 'Escape') hideCoordinateSelection(); }}>
-      <div class="modal-content" on:click|stopPropagation>
+    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" on:click={(e) => { if (e.target === e.currentTarget) hideCoordinateSelection(); }} on:keydown={(e) => { if (e.key === 'Escape') hideCoordinateSelection(); }}>
+      <div class="modal-content">
         <h2>📍 Add Reference Point</h2>
         
         <div class="point-edit-info">
