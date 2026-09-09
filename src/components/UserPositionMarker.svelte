@@ -1,37 +1,31 @@
-<svelte:options accessors />
-
 <script>
-  import { onMount, onDestroy } from 'svelte';
   import { drawUserMarker } from '../lib/draw.js';
 
   // Props
-  export let geoTransform = null;
-  export let geoTransformType = null;
-  export let transform = {
-    scale: 1,
-    translateX: 0,
-    translateY: 0,
-    rotation: 0,
-  };
-  export let imageWidth = 0;
-  export let imageHeight = 0;
-  export let scheduleRender = () => {};
+  let {
+    geoTransform = null,
+    geoTransformType = null,
+    transform = { scale: 1, translateX: 0, translateY: 0, rotation: 0 },
+    imageWidth = 0,
+    imageHeight = 0,
+    scheduleRender = () => {},
+  } = $props();
 
   // GPS state
-  let userPosition = null;
-  let gpsWatchId = null;
+  let userPosition = $state(null);
+  let gpsWatchId = $state(null);
 
   // Expose userPosition to parent
   export { userPosition };
 
-  onMount(() => {
+  $effect(() => {
     startGPSTracking();
-  });
 
-  onDestroy(() => {
-    if (gpsWatchId !== null) {
-      navigator.geolocation.clearWatch(gpsWatchId);
-    }
+    return () => {
+      if (gpsWatchId !== null) {
+        navigator.geolocation.clearWatch(gpsWatchId);
+      }
+    };
   });
 
   function startGPSTracking() {
