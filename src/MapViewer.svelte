@@ -1,97 +1,101 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { untrack } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
   import { calculateTransform, geoToImage, geoDistanceToImagePixels } from './lib/transforms.js';
   import { screenToImage, getPointAtScreen, pinchZoomTransform } from './lib/viewport.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
 
-  export let mapId;
+  let { mapId } = $props();
 
-  let map = null;
-  let imageUrl = null;
-  let referencePoints = [];
-  let canvas;
-  let ctx;
-  let imageElement;
+  let map = $state(null);
+  let imageUrl = $state(null);
+  let referencePoints = $state([]);
+  let canvas = $state(null);
+  let ctx = $state(null);
+  let imageElement = $state(null);
   
   // Transform state
-  let transform = {
+  let transform = $state({
     scale: 1,
     translateX: 0,
     translateY: 0,
     rotation: 0,
-  };
+  });
 
   // Image dimensions
-  let imageWidth = 0;
-  let imageHeight = 0;
+  let imageWidth = $state(0);
+  let imageHeight = $state(0);
 
   // Canvas dimensions
-  let canvasWidth = 0;
-  let canvasHeight = 0;
+  let canvasWidth = $state(0);
+  let canvasHeight = $state(0);
 
   // Touch/gesture state
-  let isPanning = false;
-  let lastTouchDistance = 0;
-  let lastTouchAngle = 0;
-  let lastTouchCenter = { x: 0, y: 0 };
-  let touchStartTransform = null;
+  let isPanning = $state(false);
+  let lastTouchDistance = $state(0);
+  let lastTouchAngle = $state(0);
+  let lastTouchCenter = $state({ x: 0, y: 0 });
+  let touchStartTransform = $state(null);
   
   // Long touch detection
-  let longTouchTimer = null;
-  let longTouchStartPos = null;
-  let isLongTouch = false;
+  let longTouchTimer = $state(null);
+  let longTouchStartPos = $state(null);
+  let isLongTouch = $state(false);
 
   // Mouse interaction state
-  let isMouseDown = false;
-  let mouseStartPos = null;
-  let mouseStartTransform = null;
+  let isMouseDown = $state(false);
+  let mouseStartPos = $state(null);
+  let mouseStartTransform = $state(null);
 
   // Transform state for GPS
-  let geoTransform = null;
-  let geoTransformType = null;
-  let userPositionMarker;
+  let geoTransform = $state(null);
+  let geoTransformType = $state(null);
+  let userPositionMarker = $state(null);
 
 
   // UI state
-  let showingPoints = false;
-  let editingPoint = null;
-  let hoverPointIndex = -1;
-  let showingDebug = false;
-  let pendingReferencePoint = null;
-  let showingCoordinateSelection = false;
-  let coordinateMethod = null;
-  let manualLat = '';
-  let manualLon = '';
-  let gpsPosition = null;
-  let gpsError = null;
-  let selectedLon = null;
-  let selectedLat = null;
-  let selectedAccuracy = null;
-  let mapContainer;
-  let osmMap;
-  let osmMapMarker = null;
+  let showingPoints = $state(false);
+  let editingPoint = $state(null);
+  let hoverPointIndex = $state(-1);
+  let showingDebug = $state(false);
+  let pendingReferencePoint = $state(null);
+  let showingCoordinateSelection = $state(false);
+  let coordinateMethod = $state(null);
+  let manualLat = $state('');
+  let manualLon = $state('');
+  let gpsPosition = $state(null);
+  let gpsError = $state(null);
+  let selectedLon = $state(null);
+  let selectedLat = $state(null);
+  let selectedAccuracy = $state(null);
+  let mapContainer = $state(null);
+  let osmMap = $state(null);
+  let osmMapMarker = $state(null);
 
   // Rendering state
-  let animationFrameId = null;
-  let needsRender = false;
+  let animationFrameId = $state(null);
+  let needsRender = $state(false);
 
-  onMount(async () => {
-    await loadMapData();
-    setupCanvas();
+    $effect(() => {
+    untrack(() => {
+      loadMapData();
+      setupCanvas();
+    });
     window.addEventListener('resize', handleResize);
+
+    return () => {
+      if (imageUrl) {
+        URL.revokeObjectURL(imageUrl);
+      }
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      window.removeEventListener('resize', handleResize);
+    };
   });
 
-  onDestroy(() => {
-    if (imageUrl) {
-      URL.revokeObjectURL(imageUrl);
-    }
-    if (animationFrameId) {
-      cancelAnimationFrame(animationFrameId);
-    }
-    window.removeEventListener('resize', handleResize);
-  });
+
 
   async function loadMapData() {
     try {
@@ -793,9 +797,8 @@
     }
   }
 
-  $: canSavePoint = pendingReferencePoint && selectedLon !== null && selectedLat !== null;
-
-  $: needsMorePoints = referencePoints.length < 3;
+  let canSavePoint = $derived(pendingReferencePoint && selectedLon !== null && selectedLat !== null);
+  let needsMorePoints = $derived(referencePoints.length < 3);
 </script>
 
 <div class="viewer-container">
