@@ -4,7 +4,7 @@ Persistent context for AI agents working on this repository.
 
 ## Project
 
-BYOM (Bring Your Own Map) is a serverless, offline-first PWA built with Svelte 4 + Vite 5 for georeferencing map photos and viewing GPS position offline.
+BYOM (Bring Your Own Map) is a serverless, offline-first PWA built with Svelte 5 (runes mode) + Vite 5 for georeferencing map photos and viewing GPS position offline.
 No backend: all data (map images, reference points) is stored in IndexedDB in the browser.
 
 ## Commands
