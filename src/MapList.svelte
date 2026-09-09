@@ -1,22 +1,23 @@
 <script>
-  import { onMount } from 'svelte';
+  import { untrack } from 'svelte';
   import { getAllMaps, addMap, deleteMap } from './lib/db.js';
   import './styles/MapList.css';
 
-  let maps = [];
-  let loading = true;
-  let showUploadMenu = false;
+  let maps = $state([]);
+  let loading = $state(true);
+  let showUploadMenu = $state(false);
 
-  onMount(async () => {
-    await loadMaps();
+  $effect(() => {
+    untrack(() => loadMaps());
   });
 
   async function loadMaps() {
     loading = true;
     try {
-      maps = await getAllMaps();
+      const result = await getAllMaps();
       // Sort by timestamp descending (newest first)
-      maps.sort((a, b) => b.timestamp - a.timestamp);
+      result.sort((a, b) => b.timestamp - a.timestamp);
+      maps = result;
     } catch (error) {
       console.error('Error loading maps:', error);
       alert('Failed to load maps');
