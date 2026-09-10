@@ -133,7 +133,7 @@
   }
 </script>
 
-<svelte:window on:click={handleClickOutside} on:keydown={(e) => e.key === 'Escape' && handleClickOutside()}/>
+<svelte:window onclick={handleClickOutside} onkeydown={(e) => e.key === 'Escape' && handleClickOutside()}/>
 
 <div class="container">
   <header>
@@ -143,16 +143,16 @@
 
   <div class="upload-section">
       <div class="upload-menu-container">
-      <button class="upload-btn" on:click|stopPropagation={() => showUploadMenu = !showUploadMenu}>
+      <button class="upload-btn" onclick={(e) => { e.stopPropagation(); showUploadMenu = !showUploadMenu; }}>
         📷 Add Map
       </button>
       
       {#if showUploadMenu}
         <div class="upload-menu">
-          <button class="menu-item" on:click|stopPropagation={handleCameraUpload}>
+          <button class="menu-item" onclick={(e) => { e.stopPropagation(); handleCameraUpload(); }}>
             📷 Take Photo
           </button>
-          <button class="menu-item" on:click|stopPropagation={handleFileUpload}>
+          <button class="menu-item" onclick={(e) => { e.stopPropagation(); handleFileUpload(); }}>
             📁 Choose File
           </button>
         </div>
@@ -163,7 +163,7 @@
       id="file-upload"
       type="file" 
       accept="image/*"
-      on:change={handleFileSelect}
+      onchange={handleFileSelect}
       style="display: none;"
     />
   </div>
@@ -183,8 +183,8 @@
             role="button"
             tabindex="0"
             aria-label={`Open map ${map.name}`}
-            on:click={() => openMap(map.id)}
-            on:keydown={(e) => {
+            onclick={() => openMap(map.id)}
+            onkeydown={(e) => {
               if (e.key === 'Enter' || e.key === ' ') {
                 e.preventDefault();
                 openMap(map.id);
@@ -202,7 +202,7 @@
           </div>
           <button 
             class="delete-btn" 
-            on:click|stopPropagation={(e) => handleDeleteMap(map.id, e)}
+            onclick={(e) => { e.stopPropagation(); handleDeleteMap(map.id, e); }}
             aria-label="Delete map"
           >
             ×

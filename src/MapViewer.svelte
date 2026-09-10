@@ -814,32 +814,32 @@
   
   <canvas
     bind:this={canvas}
-    on:touchstart={handleTouchStart}
-    on:touchmove={handleTouchMove}
-    on:touchend={handleTouchEnd}
-    on:wheel={handleWheel}
-    on:click={handleCanvasClick}
-    on:mousemove={handleCanvasMouseMove}
-    on:mousedown={handleMouseDown}
-    on:mouseup={handleMouseUp}
-    on:mouseleave={handleMouseUp}
+    ontouchstart={handleTouchStart}
+    ontouchmove={handleTouchMove}
+    ontouchend={handleTouchEnd}
+    onwheel={handleWheel}
+    onclick={handleCanvasClick}
+    onmousemove={handleCanvasMouseMove}
+    onmousedown={handleMouseDown}
+    onmouseup={handleMouseUp}
+    onmouseleave={handleMouseUp}
   ></canvas>
 
   <div class="controls">
-    <button class="control-btn back-btn" on:click={goBack}>
+    <button class="control-btn back-btn" onclick={goBack}>
       ← Back
     </button>
 
     <button 
       class="control-btn edit-points-btn {showingPoints ? 'active' : ''}" 
-      on:click={togglePoints}
+      onclick={togglePoints}
     >
       {showingPoints ? '👁️' : '📝'} Points ({referencePoints.length})
     </button>
 
     <button 
       class="control-btn debug-btn {showingDebug ? 'active' : ''}" 
-      on:click={toggleDebug}
+      onclick={toggleDebug}
     >
       🐛 Debug
     </button>
@@ -870,7 +870,7 @@
   {/if}
 
   {#if editingPoint}
-    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" on:click={(e) => { if (e.target === e.currentTarget) cancelEdit(); }} on:keydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}>
+    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) cancelEdit(); }} onkeydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}>
       <div class="modal-content">
         <h2>Edit Point #{editingPoint.index + 1}</h2>
         
@@ -902,13 +902,13 @@
         </div>
         
         <div class="button-group">
-          <button class="btn btn-danger" on:click={deleteEditingPoint}>
+          <button class="btn btn-danger" onclick={deleteEditingPoint}>
             🗑️ Delete
           </button>
-          <button class="btn btn-secondary" on:click={cancelEdit}>
+          <button class="btn btn-secondary" onclick={cancelEdit}>
             Cancel
           </button>
-          <button class="btn btn-primary" on:click={saveEditedPoint}>
+          <button class="btn btn-primary" onclick={saveEditedPoint}>
             Save
           </button>
         </div>
@@ -917,7 +917,7 @@
   {/if}
 
   {#if showingDebug}
-    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" on:click={(e) => { if (e.target === e.currentTarget) toggleDebug(); }} on:keydown={(e) => { if (e.key === 'Escape') toggleDebug(); }}>
+    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) toggleDebug(); }} onkeydown={(e) => { if (e.key === 'Escape') toggleDebug(); }}>
       <div class="modal-content debug-modal">
         <h2>🐛 Debug Information</h2>
         
@@ -1026,7 +1026,7 @@
         </div>
         
         <div class="button-group">
-          <button class="btn btn-secondary" on:click={toggleDebug}>
+          <button class="btn btn-secondary" onclick={toggleDebug}>
             Close
           </button>
         </div>
@@ -1035,7 +1035,7 @@
   {/if}
 
   {#if showingCoordinateSelection}
-    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" on:click={(e) => { if (e.target === e.currentTarget) hideCoordinateSelection(); }} on:keydown={(e) => { if (e.key === 'Escape') hideCoordinateSelection(); }}>
+    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) hideCoordinateSelection(); }} onkeydown={(e) => { if (e.key === 'Escape') hideCoordinateSelection(); }}>
       <div class="modal-content">
         <h2>📍 Add Reference Point</h2>
         
@@ -1050,19 +1050,19 @@
         
         {#if !coordinateMethod}
           <div class="method-selection">
-            <button class="method-btn" on:click={() => selectCoordinateMethod('gps')}>
+            <button class="method-btn" onclick={() => selectCoordinateMethod('gps')}>
               <div class="method-icon">📍</div>
               <div class="method-title">Use GPS</div>
               <div class="method-desc">Use current device location</div>
             </button>
             
-            <button class="method-btn" on:click={() => selectCoordinateMethod('manual')}>
+            <button class="method-btn" onclick={() => selectCoordinateMethod('manual')}>
               <div class="method-icon">⌨️</div>
               <div class="method-title">Manual Entry</div>
               <div class="method-desc">Type coordinates</div>
             </button>
             
-            <button class="method-btn" on:click={() => selectCoordinateMethod('map')}>
+            <button class="method-btn" onclick={() => selectCoordinateMethod('map')}>
               <div class="method-icon">🗺️</div>
               <div class="method-title">Select on Map</div>
               <div class="method-desc">Choose from OSM map (online)</div>
@@ -1072,7 +1072,7 @@
           <div class="coordinate-input">
             {#if gpsError}
               <div class="error-message">{gpsError}</div>
-              <button class="btn btn-secondary" on:click={getCurrentGPS}>Try Again</button>
+              <button class="btn btn-secondary" onclick={getCurrentGPS}>Try Again</button>
             {:else if gpsPosition}
               <div class="success-message">
                 ✓ GPS location acquired
@@ -1088,7 +1088,7 @@
             {:else}
               <div class="loading-message">📡 Getting GPS location...</div>
             {/if}
-            <button class="btn btn-secondary" on:click={() => coordinateMethod = null}>
+            <button class="btn btn-secondary" onclick={() => coordinateMethod = null}>
               Choose Different Method
             </button>
           </div>
@@ -1114,10 +1114,10 @@
                 placeholder="e.g., -74.0060"
               />
             </div>
-            <button class="btn btn-primary" on:click={useManualCoordinates}>
+            <button class="btn btn-primary" onclick={useManualCoordinates}>
               Use These Coordinates
             </button>
-            <button class="btn btn-secondary" on:click={() => coordinateMethod = null}>
+            <button class="btn btn-secondary" onclick={() => coordinateMethod = null}>
               Choose Different Method
             </button>
           </div>
@@ -1130,20 +1130,20 @@
                 Selected: {selectedLat.toFixed(6)}, {selectedLon.toFixed(6)}
               </div>
             {/if}
-            <button class="btn btn-secondary" on:click={() => coordinateMethod = null}>
+            <button class="btn btn-secondary" onclick={() => coordinateMethod = null}>
               Choose Different Method
             </button>
           </div>
         {/if}
         
         <div class="button-group">
-          <button class="btn btn-secondary" on:click={hideCoordinateSelection}>
+          <button class="btn btn-secondary" onclick={hideCoordinateSelection}>
             Cancel
           </button>
           <button 
             class="btn btn-primary" 
             disabled={!canSavePoint}
-            on:click={saveReferencePoint}
+            onclick={saveReferencePoint}
           >
             Save Point
           </button>
