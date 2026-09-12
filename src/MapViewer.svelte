@@ -1,97 +1,101 @@
 <script>
-  import { onMount, onDestroy } from 'svelte';
+  import { untrack } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
   import { calculateTransform, geoToImage, geoDistanceToImagePixels } from './lib/transforms.js';
   import { screenToImage, getPointAtScreen, pinchZoomTransform } from './lib/viewport.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
 
-  export let mapId;
+  let { mapId } = $props();
 
-  let map = null;
-  let imageUrl = null;
-  let referencePoints = [];
-  let canvas;
-  let ctx;
-  let imageElement;
+  let map = $state(null);
+  let imageUrl = $state(null);
+  let referencePoints = $state([]);
+  let canvas = $state(null);
+  let ctx = $state(null);
+  let imageElement = $state(null);
   
   // Transform state
-  let transform = {
+  let transform = $state({
     scale: 1,
     translateX: 0,
     translateY: 0,
     rotation: 0,
-  };
+  });
 
   // Image dimensions
-  let imageWidth = 0;
-  let imageHeight = 0;
+  let imageWidth = $state(0);
+  let imageHeight = $state(0);
 
   // Canvas dimensions
-  let canvasWidth = 0;
-  let canvasHeight = 0;
+  let canvasWidth = $state(0);
+  let canvasHeight = $state(0);
 
   // Touch/gesture state
-  let isPanning = false;
-  let lastTouchDistance = 0;
-  let lastTouchAngle = 0;
-  let lastTouchCenter = { x: 0, y: 0 };
-  let touchStartTransform = null;
+  let isPanning = $state(false);
+  let lastTouchDistance = $state(0);
+  let lastTouchAngle = $state(0);
+  let lastTouchCenter = $state({ x: 0, y: 0 });
+  let touchStartTransform = $state(null);
   
   // Long touch detection
-  let longTouchTimer = null;
-  let longTouchStartPos = null;
-  let isLongTouch = false;
+  let longTouchTimer = $state(null);
+  let longTouchStartPos = $state(null);
+  let isLongTouch = $state(false);
 
   // Mouse interaction state
-  let isMouseDown = false;
-  let mouseStartPos = null;
-  let mouseStartTransform = null;
+  let isMouseDown = $state(false);
+  let mouseStartPos = $state(null);
+  let mouseStartTransform = $state(null);
 
   // Transform state for GPS
-  let geoTransform = null;
-  let geoTransformType = null;
-  let userPositionMarker;
+  let geoTransform = $state(null);
+  let geoTransformType = $state(null);
+  let userPositionMarker = $state(null);
 
 
   // UI state
-  let showingPoints = false;
-  let editingPoint = null;
-  let hoverPointIndex = -1;
-  let showingDebug = false;
-  let pendingReferencePoint = null;
-  let showingCoordinateSelection = false;
-  let coordinateMethod = null;
-  let manualLat = '';
-  let manualLon = '';
-  let gpsPosition = null;
-  let gpsError = null;
-  let selectedLon = null;
-  let selectedLat = null;
-  let selectedAccuracy = null;
-  let mapContainer;
-  let osmMap;
-  let osmMapMarker = null;
+  let showingPoints = $state(false);
+  let editingPoint = $state(null);
+  let hoverPointIndex = $state(-1);
+  let showingDebug = $state(false);
+  let pendingReferencePoint = $state(null);
+  let showingCoordinateSelection = $state(false);
+  let coordinateMethod = $state(null);
+  let manualLat = $state('');
+  let manualLon = $state('');
+  let gpsPosition = $state(null);
+  let gpsError = $state(null);
+  let selectedLon = $state(null);
+  let selectedLat = $state(null);
+  let selectedAccuracy = $state(null);
+  let mapContainer = $state(null);
+  let osmMap = $state(null);
+  let osmMapMarker = $state(null);
 
   // Rendering state
-  let animationFrameId = null;
-  let needsRender = false;
+  let animationFrameId = $state(null);
+  let needsRender = $state(false);
 
-  onMount(async () => {
-    await loadMapData();
-    setupCanvas();
+    $effect(() => {
+    untrack(() => {
+      loadMapData();
+      setupCanvas();
+    });
     window.addEventListener('resize', handleResize);
+
+    return () => {
+      if (imageUrl) {
+        URL.revokeObjectURL(imageUrl);
+      }
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      window.removeEventListener('resize', handleResize);
+    };
   });
 
-  onDestroy(() => {
-    if (imageUrl) {
-      URL.revokeObjectURL(imageUrl);
-    }
-    if (animationFrameId) {
-      cancelAnimationFrame(animationFrameId);
-    }
-    window.removeEventListener('resize', handleResize);
-  });
+
 
   async function loadMapData() {
     try {
@@ -793,9 +797,8 @@
     }
   }
 
-  $: canSavePoint = pendingReferencePoint && selectedLon !== null && selectedLat !== null;
-
-  $: needsMorePoints = referencePoints.length < 3;
+  let canSavePoint = $derived(pendingReferencePoint && selectedLon !== null && selectedLat !== null);
+  let needsMorePoints = $derived(referencePoints.length < 3);
 </script>
 
 <div class="viewer-container">
@@ -811,32 +814,32 @@
   
   <canvas
     bind:this={canvas}
-    on:touchstart={handleTouchStart}
-    on:touchmove={handleTouchMove}
-    on:touchend={handleTouchEnd}
-    on:wheel={handleWheel}
-    on:click={handleCanvasClick}
-    on:mousemove={handleCanvasMouseMove}
-    on:mousedown={handleMouseDown}
-    on:mouseup={handleMouseUp}
-    on:mouseleave={handleMouseUp}
+    ontouchstart={handleTouchStart}
+    ontouchmove={handleTouchMove}
+    ontouchend={handleTouchEnd}
+    onwheel={handleWheel}
+    onclick={handleCanvasClick}
+    onmousemove={handleCanvasMouseMove}
+    onmousedown={handleMouseDown}
+    onmouseup={handleMouseUp}
+    onmouseleave={handleMouseUp}
   ></canvas>
 
   <div class="controls">
-    <button class="control-btn back-btn" on:click={goBack}>
+    <button class="control-btn back-btn" onclick={goBack}>
       ← Back
     </button>
 
     <button 
       class="control-btn edit-points-btn {showingPoints ? 'active' : ''}" 
-      on:click={togglePoints}
+      onclick={togglePoints}
     >
       {showingPoints ? '👁️' : '📝'} Points ({referencePoints.length})
     </button>
 
     <button 
       class="control-btn debug-btn {showingDebug ? 'active' : ''}" 
-      on:click={toggleDebug}
+      onclick={toggleDebug}
     >
       🐛 Debug
     </button>
@@ -867,7 +870,7 @@
   {/if}
 
   {#if editingPoint}
-    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" on:click={(e) => { if (e.target === e.currentTarget) cancelEdit(); }} on:keydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}>
+    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) cancelEdit(); }} onkeydown={(e) => { if (e.key === 'Escape') cancelEdit(); }}>
       <div class="modal-content">
         <h2>Edit Point #{editingPoint.index + 1}</h2>
         
@@ -899,13 +902,13 @@
         </div>
         
         <div class="button-group">
-          <button class="btn btn-danger" on:click={deleteEditingPoint}>
+          <button class="btn btn-danger" onclick={deleteEditingPoint}>
             🗑️ Delete
           </button>
-          <button class="btn btn-secondary" on:click={cancelEdit}>
+          <button class="btn btn-secondary" onclick={cancelEdit}>
             Cancel
           </button>
-          <button class="btn btn-primary" on:click={saveEditedPoint}>
+          <button class="btn btn-primary" onclick={saveEditedPoint}>
             Save
           </button>
         </div>
@@ -914,7 +917,7 @@
   {/if}
 
   {#if showingDebug}
-    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" on:click={(e) => { if (e.target === e.currentTarget) toggleDebug(); }} on:keydown={(e) => { if (e.key === 'Escape') toggleDebug(); }}>
+    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) toggleDebug(); }} onkeydown={(e) => { if (e.key === 'Escape') toggleDebug(); }}>
       <div class="modal-content debug-modal">
         <h2>🐛 Debug Information</h2>
         
@@ -1023,7 +1026,7 @@
         </div>
         
         <div class="button-group">
-          <button class="btn btn-secondary" on:click={toggleDebug}>
+          <button class="btn btn-secondary" onclick={toggleDebug}>
             Close
           </button>
         </div>
@@ -1032,7 +1035,7 @@
   {/if}
 
   {#if showingCoordinateSelection}
-    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" on:click={(e) => { if (e.target === e.currentTarget) hideCoordinateSelection(); }} on:keydown={(e) => { if (e.key === 'Escape') hideCoordinateSelection(); }}>
+    <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) hideCoordinateSelection(); }} onkeydown={(e) => { if (e.key === 'Escape') hideCoordinateSelection(); }}>
       <div class="modal-content">
         <h2>📍 Add Reference Point</h2>
         
@@ -1047,19 +1050,19 @@
         
         {#if !coordinateMethod}
           <div class="method-selection">
-            <button class="method-btn" on:click={() => selectCoordinateMethod('gps')}>
+            <button class="method-btn" onclick={() => selectCoordinateMethod('gps')}>
               <div class="method-icon">📍</div>
               <div class="method-title">Use GPS</div>
               <div class="method-desc">Use current device location</div>
             </button>
             
-            <button class="method-btn" on:click={() => selectCoordinateMethod('manual')}>
+            <button class="method-btn" onclick={() => selectCoordinateMethod('manual')}>
               <div class="method-icon">⌨️</div>
               <div class="method-title">Manual Entry</div>
               <div class="method-desc">Type coordinates</div>
             </button>
             
-            <button class="method-btn" on:click={() => selectCoordinateMethod('map')}>
+            <button class="method-btn" onclick={() => selectCoordinateMethod('map')}>
               <div class="method-icon">🗺️</div>
               <div class="method-title">Select on Map</div>
               <div class="method-desc">Choose from OSM map (online)</div>
@@ -1069,7 +1072,7 @@
           <div class="coordinate-input">
             {#if gpsError}
               <div class="error-message">{gpsError}</div>
-              <button class="btn btn-secondary" on:click={getCurrentGPS}>Try Again</button>
+              <button class="btn btn-secondary" onclick={getCurrentGPS}>Try Again</button>
             {:else if gpsPosition}
               <div class="success-message">
                 ✓ GPS location acquired
@@ -1085,7 +1088,7 @@
             {:else}
               <div class="loading-message">📡 Getting GPS location...</div>
             {/if}
-            <button class="btn btn-secondary" on:click={() => coordinateMethod = null}>
+            <button class="btn btn-secondary" onclick={() => coordinateMethod = null}>
               Choose Different Method
             </button>
           </div>
@@ -1111,10 +1114,10 @@
                 placeholder="e.g., -74.0060"
               />
             </div>
-            <button class="btn btn-primary" on:click={useManualCoordinates}>
+            <button class="btn btn-primary" onclick={useManualCoordinates}>
               Use These Coordinates
             </button>
-            <button class="btn btn-secondary" on:click={() => coordinateMethod = null}>
+            <button class="btn btn-secondary" onclick={() => coordinateMethod = null}>
               Choose Different Method
             </button>
           </div>
@@ -1127,20 +1130,20 @@
                 Selected: {selectedLat.toFixed(6)}, {selectedLon.toFixed(6)}
               </div>
             {/if}
-            <button class="btn btn-secondary" on:click={() => coordinateMethod = null}>
+            <button class="btn btn-secondary" onclick={() => coordinateMethod = null}>
               Choose Different Method
             </button>
           </div>
         {/if}
         
         <div class="button-group">
-          <button class="btn btn-secondary" on:click={hideCoordinateSelection}>
+          <button class="btn btn-secondary" onclick={hideCoordinateSelection}>
             Cancel
           </button>
           <button 
             class="btn btn-primary" 
             disabled={!canSavePoint}
-            on:click={saveReferencePoint}
+            onclick={saveReferencePoint}
           >
             Save Point
           </button>

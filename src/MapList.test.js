@@ -105,7 +105,8 @@ describe('MapList', () => {
     expect(inputSpy).toHaveBeenCalledTimes(1);
 
     fireEvent.click(addBtn);
-    fireEvent.click(fileBtn);
+    const fileBtnAfterReopen = screen.getByRole('button', { name: /choose file/i });
+    fireEvent.click(fileBtnAfterReopen);
     expect(inputSpy).toHaveBeenCalledTimes(2);
   });
 

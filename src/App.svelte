@@ -1,15 +1,14 @@
 <script>
-  import { onMount } from 'svelte';
+  import { initDB } from './lib/db.js';
   import MapList from './MapList.svelte';
   import MapViewer from './MapViewer.svelte';
-  import { initDB } from './lib/db.js';
 
-  let currentView = 'list'; // 'list' or 'viewer'
-  let currentMapId = null;
+  let currentView = $state('list'); // 'list' or 'viewer'
+  let currentMapId = $state(null);
 
-  onMount(async () => {
+  $effect(() => {
     // Initialize the database
-    await initDB();
+    initDB();
 
     // Handle hash-based routing
     handleHashChange();
@@ -22,7 +21,7 @@
 
   function handleHashChange() {
     const hash = window.location.hash;
-    
+
     if (hash.startsWith('#map/')) {
       const mapId = hash.substring(5);
       currentMapId = mapId;
