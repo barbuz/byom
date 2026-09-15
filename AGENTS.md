@@ -65,6 +65,28 @@ Run tests: `npm test` or `npm run test:coverage`. Test glob: `src/**/*.test.js` 
 - Transform object shape: `{ scale, translateX, translateY, rotation }`.
 - Style: 2-space indent, semicolons, single quotes; match surrounding code. No lint/format script configured.
 
+## Versioning
+
+Three independent identifiers — do not conflate them:
+
+- **App version**: CalVer `YYYY.M.PATCH` in `package.json` (e.g. `2026.9.0`).
+  Bump it in the release PR and keep `package-lock.json` in sync. Surfaced in
+  the UI via the `__APP_VERSION__` define, which is set in **both**
+  `vite.config.js` and `vitest.config.js` — keep those two in sync.
+- **Build id**: commit SHA (`GITHUB_SHA`), injected into `public/sw.js` by the
+  `byom:service-worker-versioning` Vite plugin. Never hand-edited; local builds
+  fall back to a timestamp. This is what makes the browser pick up a new shell.
+- **`DB_VERSION`** (`src/lib/db.js`): IndexedDB schema only. Unrelated to
+  releases; bump it just for schema migrations, with a migration in
+  `onupgradeneeded`.
+
+`public/sw.js` uses two caches: `byom-shell-<version>-<buildId>` (versioned per
+deploy, purged on activate) and `byom-assets` (never versioned — content-hashed
+URLs cannot go stale, and retaining them keeps open tabs working). Cleanup is
+prefix-scoped to `byom-shell-`, so never widen it to all `byom-*` caches or the
+asset cache gets wiped on every deploy. Both caches are orthogonal to user data,
+which lives in IndexedDB and survives all updates.
+
 ## Build / Deployment Notes
 
 - `vite.config.js`: `base: '/byom/'` (GitHub Pages); HTTPS dev server uses `localhost-key.pem` and `localhost-cert.pem`; `host: true` for LAN testing.

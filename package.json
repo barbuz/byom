@@ -1,6 +1,6 @@
 {
   "name": "byom",
-  "version": "1.0.1",
+  "version": "2026.9.0",
   "type": "module",
   "description": "BYOM - Bring Your Own Map: Georeference map photos and view GPS location offline",
   "scripts": {

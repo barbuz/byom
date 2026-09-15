@@ -216,14 +216,20 @@ npm run build
    - Click "Unregister"
    - Refresh page
 
-3. **Update cache name**: In `public/sw.js`:
-   ```js
-   const CACHE_NAME = 'byom-v2';  // Increment version
-   ```
+3. **Check the deployed build id**:
+   The cache name is generated at build time as
+   `byom-shell-<APP_VERSION>-<BUILD_ID>`, where `BUILD_ID` is the deployed commit
+   SHA. If the old shell is still being served, confirm the deployed `sw.js`
+   contains a new value (see Versioning in README.md). There is nothing to edit
+   by hand — if the app shell is not updating, the build did not run the
+   versioning plugin.
 
 4. **Clear site data**:
    - DevTools → Application → Clear storage
    - Check all boxes → "Clear site data"
+
+Note that clearing site data does **not** delete your maps: those live in
+IndexedDB, while the service worker only manages cached responses.
 
 ### Icons not showing
 
