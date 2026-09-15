@@ -127,16 +127,27 @@ starting at `0` each month and incrementing for subsequent releases that month:
 CalVer suits a continuously deployed app with no public API: the version tells
 you *when* rather than inventing a compatibility guarantee nobody consumes.
 Bump `version` in `package.json` as part of the release PR and keep
-`package-lock.json` in sync (`npm install` does this). Then tag the deploy
-commit so `git describe` and release notes work:
-
-```bash
-git tag v2026.9.1
-```
+`package-lock.json` in sync (`npm install` does this). The
+[`tag-release` workflow](.github/workflows/tag-release.yml) then tags the merge
+commit on `main` automatically and publishes a GitHub Release — you do not run
+`git tag` by hand.
 
 Because the version is mapped to `__APP_VERSION__` at build time
 (see `vite.config.js`), it is rendered in the MapList footer, which makes it
 easy to confirm which release a device is actually running.
+
+**Automated tagging.** On every push to `main` that touches `package.json`, the
+`tag-release` workflow compares the version against its parent commit's. If it
+changed, the workflow validates the format, creates an annotated tag
+`v<version>`, and publishes a Release with generated notes. The tag points at
+the merge commit on `main` — the same commit the deploy workflow builds from,
+and whose SHA becomes the `BUILD_ID` in the service worker cache name.
+
+It is safe to re-run. A tag that already exists is detected and skipped, so a
+retry or a manual `workflow_dispatch` cannot produce a duplicate tag or a
+duplicate Release, and runs are serialized by a `tag-release` concurrency
+group. Because the version is checked against the *previous* commit, tags
+appear once per release rather than on every merge.
 
 **Build id — the commit SHA, never hand-edited.** `vite.config.js` substitutes
 it into `public/sw.js`, producing a cache name of the form

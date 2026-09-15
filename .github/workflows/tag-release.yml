@@ -1,0 +1,101 @@
+name: Tag release
+
+# Creates an annotated tag (and GitHub Release) when the CalVer `version` in
+# package.json changes on main. See the Versioning section of README.md.
+#
+# The tag must point at the merge commit on main -- that is the commit the
+# deploy workflow builds from, and the one whose SHA ends up in the service
+# worker cache name.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - package.json
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+# Two runs must never race to create the same tag.
+concurrency:
+  group: tag-release
+  cancel-in-progress: false
+
+jobs:
+  tag:
+    runs-on: ubuntu-latest
+    steps:
+      # fetch-depth: 2 so HEAD^ is available to compare the previous version.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Determine whether the version changed
+        id: version
+        run: |
+          set -euo pipefail
+
+          version=$(node -p "require('./package.json').version")
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+          # CalVer: YYYY.M.PATCH, month 1-12 (zero padding allowed). Fail loudly
+          # on anything else rather than publishing a tag that does not match
+          # the documented scheme.
+          if [[ ! "$version" =~ ^[0-9]{4}\.([1-9]|0[1-9]|1[0-2])\.[0-9]+$ ]]; then
+            echo "::error::package.json version '$version' is not CalVer (YYYY.M.PATCH)"
+            exit 1
+          fi
+
+          # HEAD^ is absent on a root commit; treat that as "changed".
+          previous=$(git show HEAD^:package.json 2>/dev/null \
+            | node -p "JSON.parse(require('fs').readFileSync(0,'utf8')).version" \
+            2>/dev/null || echo "")
+
+          if [[ "$version" == "$previous" ]]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Version unchanged ($version); nothing to tag."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "Version changed: ${previous:-<none>} -> $version"
+          fi
+
+      - name: Check whether the tag already exists
+        id: exists
+        if: steps.version.outputs.changed == 'true'
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.version.outputs.version }}"
+          if git rev-parse -q --verify "refs/tags/$tag" >/dev/null; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "Tag $tag already exists; skipping."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create and push annotated tag
+        id: tag
+        if: |
+          steps.version.outputs.changed == 'true' &&
+          steps.exists.outputs.exists == 'false'
+        run: |
+          set -euo pipefail
+          tag="v${{ steps.version.outputs.version }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "$tag" -m "BYOM $tag"
+          git push origin "$tag"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+
+      - name: Publish GitHub Release
+        if: steps.tag.outputs.tag != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ steps.tag.outputs.tag }}" \
+            --title "${{ steps.tag.outputs.tag }}" \
+            --generate-notes \
+            --verify-tag

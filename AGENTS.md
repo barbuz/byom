@@ -72,7 +72,8 @@ Three independent identifiers — do not conflate them:
 - **App version**: CalVer `YYYY.M.PATCH` in `package.json` (e.g. `2026.9.0`).
   Bump it in the release PR and keep `package-lock.json` in sync. Surfaced in
   the UI via the `__APP_VERSION__` define, which is set in **both**
-  `vite.config.js` and `vitest.config.js` — keep those two in sync.
+  `vite.config.js` and `vitest.config.js` — keep those two in sync. Tagging is
+  automated by `.github/workflows/tag-release.yml`; never tag by hand.
 - **Build id**: commit SHA (`GITHUB_SHA`), injected into `public/sw.js` by the
   `byom:service-worker-versioning` Vite plugin. Never hand-edited; local builds
   fall back to a timestamp. This is what makes the browser pick up a new shell.
