@@ -7,6 +7,10 @@
   let loading = $state(true);
   let showUploadMenu = $state(false);
 
+  // Release id, injected from package.json by vite.config.js (see Versioning
+  // in README.md).
+  const APP_VERSION = __APP_VERSION__;
+
   $effect(() => {
     untrack(() => loadMaps());
   });
@@ -211,4 +215,6 @@
         {/each}
     </div>
   {/if}
+
+  <footer class="app-version">v{APP_VERSION}</footer>
 </div>

@@ -30,6 +30,13 @@ header p {
   font-size: 1.1rem;
 }
 
+.app-version {
+  margin: 2rem 0 0;
+  text-align: center;
+  color: #999;
+  font-size: 0.75rem;
+}
+
 .upload-section {
   margin: 2rem 0;
   text-align: center;

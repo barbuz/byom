@@ -1,5 +1,8 @@
 import { defineConfig, coverageConfigDefaults } from 'vitest/config';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
+import { readFileSync } from 'fs';
+
+const pkg = JSON.parse(readFileSync(new URL('./package.json', import.meta.url), 'utf8'));
 
 const browserCondition = () => ({
   name: 'byom:browser-condition',
@@ -19,6 +22,11 @@ const browserCondition = () => ({
 // https://vitest.dev/config/
 export default defineConfig({
   plugins: [svelte(), browserCondition()],
+  // Keep in sync with vite.config.js: components read the release id from
+  // package.json via this build-time define.
+  define: {
+    __APP_VERSION__: JSON.stringify(pkg.version),
+  },
   test: {
     environment: 'jsdom',
     globals: true,

@@ -73,13 +73,13 @@ byom/
 │       └── transforms.js             # Transform algorithms
 ├── public/
 │   ├── manifest.json                 # PWA manifest
-│   ├── sw.js                         # Service worker
+│   ├── sw.js                         # Service worker (version placeholders)
 │   └── icon-*.svg                    # App icons
 ├── .github/workflows/
 │   └── deploy.yml                    # GitHub Actions deployment
 ├── index.html
-├── package.json
-├── vite.config.js
+├── package.json                      # App version (CalVer) - see Versioning
+├── vite.config.js                    # Injects version + build id into sw.js
 └── README.md
 ```
 
@@ -103,6 +103,65 @@ byom/
 
 - [QUICKSTART.md](QUICKSTART.md) - Comprehensive getting started guide
 - [SETUP.md](SETUP.md) - Deployment and configuration instructions
+
+## 🔖 Versioning
+
+There are two independent identifiers, and one you should leave alone:
+
+| Identifier | Where | Meaning | Changes |
+| --- | --- | --- | --- |
+| App version | `package.json` → `version` | Release identity, shown in the UI footer | On each user-facing release |
+| Build id | Commit SHA, read by `vite.config.js` | Cache-busting key for the app shell | Automatically, every deploy |
+| `DB_VERSION` | `src/lib/db.js` | IndexedDB schema version | Only with a schema migration |
+
+**App version — CalVer (`YYYY.M.PATCH`).** The leading number is the release
+year and the middle number is the month. The last number is a patch counter,
+starting at `0` each month and incrementing for subsequent releases that month:
+
+```
+2026.9.0    first release in September 2026
+2026.9.1    second release that month
+2026.10.0   first release in October 2026
+```
+
+CalVer suits a continuously deployed app with no public API: the version tells
+you *when* rather than inventing a compatibility guarantee nobody consumes.
+Bump `version` in `package.json` as part of the release PR and keep
+`package-lock.json` in sync (`npm install` does this). Then tag the deploy
+commit so `git describe` and release notes work:
+
+```bash
+git tag v2026.9.1
+```
+
+Because the version is mapped to `__APP_VERSION__` at build time
+(see `vite.config.js`), it is rendered in the MapList footer, which makes it
+easy to confirm which release a device is actually running.
+
+**Build id — the commit SHA, never hand-edited.** `vite.config.js` substitutes
+it into `public/sw.js`, producing a cache name of the form
+`byom-shell-<APP_VERSION>-<BUILD_ID>`. A new cache name is what causes the
+browser to install the new service worker and retire the previous shell. The
+SHA is unique per deploy by construction, so there is no counter to forget;
+local builds fall back to a timestamp, and each dev server run gets its own id
+so development never serves a stale shell.
+
+The app uses **two** caches, and the distinction matters:
+
+- `byom-shell-*` — `index.html` and the manifest. Versioned per deployment and
+  purged on activate, otherwise `index.html` would be served from the cache
+  forever and new deploys would be invisible.
+- `byom-assets` — content-hashed bundles, styles and images (e.g.
+  `assets/index-CTeZ7-mB.js`). Deliberately **not** versioned: a content-hashed
+  URL can never be stale, and retaining it means a tab left open across a
+  deployment can still resolve the filenames it was built against. Cleanup is
+  scoped to the `byom-shell-` prefix so this cache survives updates.
+
+**`DB_VERSION` is unrelated to releases.** It tracks the shape of the IndexedDB
+schema, not the app's version, and it is never purged by a service worker
+update — the user's map images and reference points survive every deploy.
+Raise it only when the schema changes, and pair the change with a migration in
+`onupgradeneeded`.
 
 ## 🧪 Testing
 

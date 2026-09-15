@@ -78,6 +78,19 @@ describe('MapList', () => {
     expect(window.location.hash).toBe('#map/1');
   });
 
+  it('renders the injected app version', async () => {
+    renderList();
+    await screen.findByText('Downtown');
+    expect(screen.getByText(`v${__APP_VERSION__}`)).toBeTruthy();
+  });
+
+  it('shows the version alongside the empty state', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+    expect(screen.getByText(`v${__APP_VERSION__}`)).toBeTruthy();
+  });
+
   it('deletes a map fromthe delete button without opening it', async () => {
     renderList();
     await screen.findByText('Downtown');
