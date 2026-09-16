@@ -7,12 +7,59 @@ import {
   inverse
 } from 'transformation-matrix';
 
+// Mean metres per degree of latitude, adequate for a local planar fit.
+const METERS_PER_DEG_LAT = 111320;
+const DEG_TO_RAD = Math.PI / 180;
+
+/**
+ * Metres spanned by one degree of longitude at the given latitude.
+ * @param {number} lat
+ * @returns {number}
+ */
+export function metersPerDegreeLon(lat) {
+  return METERS_PER_DEG_LAT * Math.cos(lat * DEG_TO_RAD);
+}
+
+/**
+ * Project (lon, lat) into a local east/north metre plane about an origin.
+ * One degree of longitude spans less ground than one degree of latitude, so
+ * fitting in raw degree space is anisotropic and cannot be a similarity.
+ * @param {number} lon
+ * @param {number} lat
+ * @param {number} lon0 - Origin longitude
+ * @param {number} lat0 - Origin latitude
+ * @returns {Object} {east, north} in metres
+ */
+export function lonLatToLocalMeters(lon, lat, lon0, lat0) {
+  return {
+    east: (lon - lon0) * metersPerDegreeLon(lat0),
+    north: (lat - lat0) * METERS_PER_DEG_LAT,
+  };
+}
+
+/**
+ * Inverse of lonLatToLocalMeters.
+ * @param {number} east
+ * @param {number} north
+ * @param {number} lon0 - Origin longitude
+ * @param {number} lat0 - Origin latitude
+ * @returns {Object} {lon, lat} in degrees
+ */
+export function localMetersToLonLat(east, north, lon0, lat0) {
+  return {
+    lon: lon0 + east / metersPerDegreeLon(lat0),
+    lat: lat0 + north / METERS_PER_DEG_LAT,
+  };
+}
+
 /**
  * Compute similarity transform (2 points)
- * Transformation: x' = s*cos(θ)*x - s*sin(θ)*y + tx
- *                 y' = s*sin(θ)*x + s*cos(θ)*y + ty
+ * Fitted in a local metric plane about the midpoint of the reference points:
+ * east = s*cos(θ)*x - s*sin(θ)*y + tx
+ * north = s*sin(θ)*x + s*cos(θ)*y + ty
  * @param {Array} referencePoints - [{imageX, imageY, lon, lat}, ...]
- * @returns {Object} Transform parameters {scale, rotation, tx, ty}
+ * @returns {Object} Transform parameters {scale, rotation, tx, ty, lon0, lat0}
+ *   where scale is metres per pixel and tx/ty are metres.
  */
 export function computeSimilarityTransform(referencePoints) {
   if (referencePoints.length < 2) {
@@ -22,31 +69,39 @@ export function computeSimilarityTransform(referencePoints) {
   const p1 = referencePoints[0];
   const p2 = referencePoints[1];
 
+  // A similarity is isotropic, so it only has a solution in a plane where
+  // ground distance is isotropic: local east/north metres, not degrees.
+  const lon0 = (p1.lon + p2.lon) / 2;
+  const lat0 = (p1.lat + p2.lat) / 2;
+
+  const m1 = lonLatToLocalMeters(p1.lon, p1.lat, lon0, lat0);
+  const m2 = lonLatToLocalMeters(p2.lon, p2.lat, lon0, lat0);
+
   // Image space vector
   const dx_img = p2.imageX - p1.imageX;
   const dy_img = p2.imageY - p1.imageY;
-  
-  // Geographic space vector (lon, lat)
-  const dx_geo = p2.lon - p1.lon;
-  const dy_geo = p2.lat - p1.lat;
 
-  // Calculate scale
+  // Metric space vector
+  const dx_metric = m2.east - m1.east;
+  const dy_metric = m2.north - m1.north;
+
+  // Calculate scale (metres per pixel)
   const dist_img = Math.sqrt(dx_img * dx_img + dy_img * dy_img);
-  const dist_geo = Math.sqrt(dx_geo * dx_geo + dy_geo * dy_geo);
-  const scale = dist_geo / dist_img;
+  const dist_metric = Math.sqrt(dx_metric * dx_metric + dy_metric * dy_metric);
+  const scale = dist_metric / dist_img;
 
   // Calculate rotation
   const angle_img = Math.atan2(dy_img, dx_img);
-  const angle_geo = Math.atan2(dy_geo, dx_geo);
-  const rotation = angle_geo - angle_img;
+  const angle_metric = Math.atan2(dy_metric, dx_metric);
+  const rotation = angle_metric - angle_img;
 
   // Calculate translation using first point
   const cos_r = Math.cos(rotation);
   const sin_r = Math.sin(rotation);
-  const tx = p1.lon - (scale * cos_r * p1.imageX - scale * sin_r * p1.imageY);
-  const ty = p1.lat - (scale * sin_r * p1.imageX + scale * cos_r * p1.imageY);
+  const tx = m1.east - (scale * cos_r * p1.imageX - scale * sin_r * p1.imageY);
+  const ty = m1.north - (scale * sin_r * p1.imageX + scale * cos_r * p1.imageY);
 
-  return { scale, rotation, tx, ty };
+  return { scale, rotation, tx, ty, lon0, lat0 };
 }
 
 /**
@@ -97,12 +152,12 @@ export function computeAffineTransform(referencePoints) {
  */
 export function imageToGeo(imageX, imageY, transform, type) {
   if (type === 'similarity') {
-    const { scale, rotation, tx, ty } = transform;
+    const { scale, rotation, tx, ty, lon0, lat0 } = transform;
     const cos_r = Math.cos(rotation);
     const sin_r = Math.sin(rotation);
-    const lon = scale * cos_r * imageX - scale * sin_r * imageY + tx;
-    const lat = scale * sin_r * imageX + scale * cos_r * imageY + ty;
-    return { lon, lat };
+    const east = scale * cos_r * imageX - scale * sin_r * imageY + tx;
+    const north = scale * sin_r * imageX + scale * cos_r * imageY + ty;
+    return localMetersToLonLat(east, north, lon0, lat0);
   } else if (type === 'affine') {
     const { a, b, c, d, e, f } = transform;
     const lon = a * imageX + b * imageY + c;
@@ -122,15 +177,16 @@ export function imageToGeo(imageX, imageY, transform, type) {
  */
 export function geoToImage(lon, lat, transform, type) {
   if (type === 'similarity') {
-    const { scale, rotation, tx, ty } = transform;
+    const { scale, rotation, tx, ty, lon0, lat0 } = transform;
     const cos_r = Math.cos(rotation);
     const sin_r = Math.sin(rotation);
-    
-    // Inverse transformation
-    const lon_shifted = lon - tx;
-    const lat_shifted = lat - ty;
-    const imageX = (cos_r * lon_shifted + sin_r * lat_shifted) / scale;
-    const imageY = (-sin_r * lon_shifted + cos_r * lat_shifted) / scale;
+
+    // Inverse transformation in the local metric plane
+    const { east, north } = lonLatToLocalMeters(lon, lat, lon0, lat0);
+    const east_shifted = east - tx;
+    const north_shifted = north - ty;
+    const imageX = (cos_r * east_shifted + sin_r * north_shifted) / scale;
+    const imageY = (-sin_r * east_shifted + cos_r * north_shifted) / scale;
     return { imageX, imageY };
   } else if (type === 'affine') {
     const { a, b, c, d, e, f } = transform;
@@ -151,9 +207,26 @@ export function geoToImage(lon, lat, transform, type) {
 }
 
 /**
+ * Local metric origin used to measure a ground offset: the fitted projection
+ * origin for a similarity, otherwise the point being measured.
+ * @param {Object} transform
+ * @param {string} type - 'similarity' or 'affine'
+ * @param {number} lon
+ * @param {number} lat
+ * @returns {Object} {lon0, lat0}
+ */
+function distanceOrigin(transform, type, lon, lat) {
+  if (type === 'similarity') {
+    return { lon0: transform.lon0, lat0: transform.lat0 };
+  }
+  return { lon0: lon, lat0: lat };
+}
+
+/**
  * Convert a ground distance in meters to an image-space distance in pixels.
- * Adds an offset of `meters` meters to the given geographic location,
- * transforms both locations to image space, and measures the pixel distance.
+ * The offset is applied in the local metric plane, where one degree of
+ * longitude is weighted by cos(lat) and a ground distance is isotropic, and is
+ * split across both axes so no single axis is privileged.
  * @param {number} lon
  * @param {number} lat
  * @param {number} meters
@@ -162,10 +235,18 @@ export function geoToImage(lon, lat, transform, type) {
  * @returns {number} Distance in image pixels
  */
 export function geoDistanceToImagePixels(lon, lat, meters, transform, type) {
-  // 1 degree of latitude ≈ 111320 meters everywhere on Earth
-  const offsetLat = lat + meters / 111320;
+  const component = meters / Math.SQRT2;
+  const { lon0, lat0 } = distanceOrigin(transform, type, lon, lat);
+  const local = lonLatToLocalMeters(lon, lat, lon0, lat0);
+  const offset = localMetersToLonLat(
+    local.east + component,
+    local.north + component,
+    lon0,
+    lat0
+  );
+
   const start = geoToImage(lon, lat, transform, type);
-  const end = geoToImage(lon, offsetLat, transform, type);
+  const end = geoToImage(offset.lon, offset.lat, transform, type);
   return Math.hypot(end.imageX - start.imageX, end.imageY - start.imageY);
 }
 

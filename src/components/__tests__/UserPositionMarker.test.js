@@ -5,10 +5,12 @@ import UserPositionMarker from "../UserPositionMarker.svelte";
 import assert from "node:assert/strict";
 
 const SIM = {
-  scale: 0.1,
+  scale: 100,
   rotation: 0,
   tx: 10,
-  ty:  20,
+  ty: 20,
+  lon0: 10,
+  lat0: 20,
 };
 
 function firstWatcher() {

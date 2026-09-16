@@ -66,7 +66,7 @@ describe('drawReferencePoints', () => {
       { scale:  2, rotation:  0.5, translateX:  0, translateY:  0 },
       100,
       80,
-      { showingPoints:  true, geoTransform: { scale:  1, rotation:  0, tx:  0, ty:  0 }, geoTransformType: 'similarity' }
+      { showingPoints:  true, geoTransform: { scale: 100, rotation: 0, tx: 0, ty: 0, lon0: 1, lat0: 2 }, geoTransformType: 'similarity' }
     );
     const arcs = ctx.calls.filter(c => c[0] === 'arc');
     expect(arcs.length).toBeGreaterThanOrEqual(2);
@@ -82,7 +82,7 @@ describe('drawReferencePoints', () => {
       { scale: 2, rotation: 0.5, translateX: 0, translateY: 0 },
       100,
       80,
-      { showingPoints: true, geoTransform: { scale: 1, rotation: 0, tx: 0, ty: 0 }, geoTransformType: 'similarity' }
+      { showingPoints: true, geoTransform: { scale: 100, rotation: 0, tx: 0, ty: 0, lon0: 1, lat0: 2 }, geoTransformType: 'similarity' }
     );
     const fs = ctx.calls.filter(c => c[0] === 'fillStyle');
     const ss = ctx.calls.filter(c => c[0] === 'strokeStyle');
@@ -120,7 +120,7 @@ describe('drawUserMarker', () => {
 
  it('draws position marker when geoTransform is provided', () => {
     const ctx = fakeCtx();
-    const geoTransform = { scale:  1, rotation:  0, tx:  0, ty:  0 };
+    const geoTransform = { scale: 100, rotation: 0, tx: 0, ty: 0, lon0: 0, lat0: 0 };
     drawUserMarker(ctx, { longitude:  0, latitude:  0, accuracy:  5 },  geoTransform, 'similarity',{ scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80);
     expect(ctx.calls.filter(c => c[0] === 'arc').length).toBeGreaterThanOrEqual(1);
     expect(ctx.calls.filter(c => c[0] === 'restore')).toHaveLength(1);
