@@ -50,7 +50,6 @@
 
   // Transform state for GPS
   let geoTransform = $state(null);
-  let geoTransformType = $state(null);
   let userPositionMarker = $state(null);
 
 
@@ -199,8 +198,7 @@
             point.lon,
             point.lat,
             point.accuracy,
-            geoTransform,
-            geoTransformType
+            geoTransform
           );
           ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
           ctx.strokeStyle = 'rgba(33, 150, 243, 0.35)';
@@ -287,14 +285,7 @@
   }
 
   function updateGeoTransform() {
-    const result = calculateTransform(referencePoints);
-    if (result) {
-      geoTransform = result.transform;
-      geoTransformType = result.type;
-    } else {
-      geoTransform = null;
-      geoTransformType = null;
-    }
+    geoTransform = calculateTransform(referencePoints);
   }
 
 
@@ -805,7 +796,6 @@
   <UserPositionMarker
     bind:this={userPositionMarker}
     {geoTransform}
-    {geoTransformType}
     {transform}
     {imageWidth}
     {imageHeight}
@@ -856,8 +846,10 @@
       <div class="transform-status">
         {#if referencePoints.length === 2}
           ✓ Similarity transform
-        {:else if referencePoints.length >= 3}
+        {:else if referencePoints.length === 3}
           ✓ Affine transform ({referencePoints.length} points)
+        {:else if referencePoints.length >= 4}
+          ✓ Homography transform ({referencePoints.length} points)
         {/if}
       </div>
     </div>
@@ -938,7 +930,7 @@
                 <span>{userPositionMarker.userPosition.accuracy?.toFixed(0)}m</span>
               </div>
               {#if geoTransform}
-                {@const imgCoords = geoToImage(userPositionMarker.userPosition.longitude, userPositionMarker.userPosition.latitude, geoTransform, geoTransformType)}
+                {@const imgCoords = geoToImage(userPositionMarker.userPosition.longitude, userPositionMarker.userPosition.latitude, geoTransform)}
                 <div class="info-row">
                   <strong>Image Coordinates:</strong>
                   <span>({imgCoords.imageX.toFixed(1)}, {imgCoords.imageY.toFixed(1)})</span>
@@ -957,7 +949,7 @@
           <div class="debug-info">
             <div class="info-row">
               <strong>Transform Type:</strong>
-              <span>{geoTransformType || 'None'}</span>
+              <span>{geoTransform?.type || 'None'}</span>
             </div>
             {#if geoTransform}
               <div class="info-row">

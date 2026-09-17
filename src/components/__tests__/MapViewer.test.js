@@ -278,7 +278,7 @@ describe("MapViewer GPS flows", () => {
 
     const { geoToImage, calculateTransform } = await import("../../lib/transforms.js");
     const transform = calculateTransform(REF_POINTS);
-    const computed = geoToImage(-73.5, 40.5, transform.transform, transform.type);
+    const computed = geoToImage(-73.5, 40.5, transform);
     await screen.findByText(
       new RegExp(`${computed.imageX.toFixed(1)}, ${computed.imageY.toFixed(1)}`)
     );

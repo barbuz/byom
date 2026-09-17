@@ -4,7 +4,6 @@
   // Props
   let {
     geoTransform = null,
-    geoTransformType = null,
     transform = { scale: 1, translateX: 0, translateY: 0, rotation: 0 },
     imageWidth = 0,
     imageHeight = 0,
@@ -55,6 +54,6 @@
   }
 
   export function drawUserPosition(ctx) {
-    drawUserMarker(ctx, userPosition, geoTransform, geoTransformType, transform, imageWidth, imageHeight);
+    drawUserMarker(ctx, userPosition, geoTransform, transform, imageWidth, imageHeight);
   }
 </script>

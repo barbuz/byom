@@ -42,7 +42,7 @@ public/
 .github/workflows/              # test.yml, deploy.yml (GitHub Pages, opencode.yml)
 ```
 
-`src/lib/` holds pure ES modules: `db.js` (IndexedDB wrapper), `transforms.js` (similarity/affine transforms), `viewport.js` (screen/image coordinate math, pinch-zoom), `draw.js` (canvas rendering, takes a `ctx`).
+`src/lib/` holds pure ES modules: `db.js` (IndexedDB wrapper), `transforms.js` (similarity/affine/homography georeferencing), `viewport.js` (screen/image coordinate math, pinch-zoom), `draw.js` (canvas rendering, takes a `ctx`).
 
 ## Testing
 
@@ -62,7 +62,8 @@ Run tests: `npm test` or `npm run test:coverage`. Test glob: `src/**/*.test.js` 
 
 - ES modules only (`"type": "module"`); import with file extensions (`./db.js`, `../lib/draw.js`).
 - Keep pure logic in `src/lib/`; put DOM/canvas/geolocation access in Svelte components or `draw.js` functions taking a `ctx`.
-- Transform object shape: `{ scale, translateX, translateY, rotation }`.
+- Transform object shape: `{ scale, translateX, translateY, rotation }` (the on-screen view transform).
+- Geo transform shape (from `calculateTransform`, `src/lib/transforms.js`): `{ m, type, lon0, lat0 }` — `m` is a row-major 3x3 homogeneous matrix mapping image pixels to local east/north metres about `(lon0, lat0)`, `type` is `'similarity' | 'affine' | 'homography'`. All three models share this shape; `m[6]`/`m[7]` are 0 for similarity and affine. Callers pass the whole object (no separate type argument). Models are chosen by point count: 2 → similarity, 3 → affine, 4 → homography. Every model is fitted in the local metric plane, never in raw degrees (degree space is anisotropic by `cos(lat)`).
 - Style: 2-space indent, semicolons, single quotes; match surrounding code. No lint/format script configured.
 
 ## Versioning

@@ -25,8 +25,7 @@
     "vitest": "^2.1.9"
   },
   "dependencies": {
-    "maplibre-gl": "^4.0.0",
-    "transformation-matrix": "^3.1.0"
+    "maplibre-gl": "^4.0.0"
   },
   "overrides": {
     "undici": "6.19.8"
