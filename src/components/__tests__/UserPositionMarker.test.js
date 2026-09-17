@@ -5,10 +5,8 @@ import UserPositionMarker from "../UserPositionMarker.svelte";
 import assert from "node:assert/strict";
 
 const SIM = {
-  scale: 100,
-  rotation: 0,
-  tx: 10,
-  ty: 20,
+  m: [100, 0, 0, 0, 100, 0, 0, 0, 1],
+  type: 'similarity',
   lon0: 10,
   lat0: 20,
 };
@@ -152,7 +150,6 @@ describe("UserPositionMarker", () => {
         props: {
           scheduleRender,
           geoTransform: SIM,
-          geoTransformType: "similarity",
           transform: { scale:  2, translateX:  5, translateY:  6, rotation:  0.3 },
           imageWidth:  800,
           imageHeight:  600,
@@ -193,7 +190,7 @@ describe("UserPositionMarker", () => {
     const ctx = canvas.getContext("2d");
     const result = render(
       UserPositionMarker,
-      { props: { scheduleRender, geoTransform: SIM, geoTransformType: "similarity" } },
+      { props: { scheduleRender, geoTransform: SIM } },
     );
     const component = result.component;
     emitPosition({ latitude:  20, longitude:  10, accuracy: null });

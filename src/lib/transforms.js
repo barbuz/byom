@@ -1,15 +1,23 @@
 /**
- * Coordinate transformation utilities for BYOM
+ * Coordinate transformation utilities for BYOM.
+ *
+ * Similarity, affine and homography all map image pixels to local east/north
+ * metres and share the same homogeneous 3x3 matrix representation, so callers
+ * only ever hold one shape: the fitted matrix, its type label, and the metric
+ * plane's origin. Ground distance per degree varies with latitude, so a fit is
+ * only isotropic in that metric plane; every model is therefore fitted there.
+ *
+ * Matrix layout is row-major:
+ *   [m0 m1 m2]
+ *   [m3 m4 m5]
+ *   [m6 m7 m8]
+ * with m6/m7 zero for the similarity and affine cases.
  */
-import { 
-  fromTriangles,
-  applyToPoint,
-  inverse
-} from 'transformation-matrix';
 
 // Mean metres per degree of latitude, adequate for a local planar fit.
 const METERS_PER_DEG_LAT = 111320;
 const DEG_TO_RAD = Math.PI / 180;
+const PIVOT_EPSILON = 1e-12;
 
 /**
  * Metres spanned by one degree of longitude at the given latitude.
@@ -53,173 +61,244 @@ export function localMetersToLonLat(east, north, lon0, lat0) {
 }
 
 /**
- * Compute similarity transform (2 points)
- * Fitted in a local metric plane about the midpoint of the reference points:
- * east = s*cos(θ)*x - s*sin(θ)*y + tx
- * north = s*sin(θ)*x + s*cos(θ)*y + ty
+ * Invert a row-major 3x3 matrix via its adjugate.
+ * @param {Array<number>} m
+ * @returns {Array<number>|null} Inverse, or null when singular.
+ */
+function invertMatrix(m) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  const c11 = e * i - f * h;
+  const c12 = -(d * i - f * g);
+  const c13 = d * h - e * g;
+  const determinant = a * c11 + b * c12 + c * c13;
+  if (!Number.isFinite(determinant) || Math.abs(determinant) < PIVOT_EPSILON) {
+    return null;
+  }
+  const adjugate = [
+    c11, -(b * i - c * h), b * f - c * e,
+    c12, a * i - c * g, -(a * f - c * d),
+    c13, -(a * h - b * g), a * e - b * d,
+  ];
+  return adjugate.map(value => value / determinant);
+}
+
+/**
+ * Apply a homogeneous matrix to a point.
+ * @param {Array<number>} m
+ * @param {number} x
+ * @param {number} y
+ * @returns {Object|null} {x, y}, or null when the point maps to infinity.
+ */
+function applyMatrix(m, x, y) {
+  const w = m[6] * x + m[7] * y + m[8];
+  const mappedX = (m[0] * x + m[1] * y + m[2]) / w;
+  const mappedY = (m[3] * x + m[4] * y + m[5]) / w;
+  if (!Number.isFinite(mappedX) || !Number.isFinite(mappedY)) {
+    return null;
+  }
+  return { x: mappedX, y: mappedY };
+}
+
+/**
+ * Solve a square linear system by Gauss-Jordan elimination with partial
+ * pivoting, used to fit each model's coefficients.
+ * @param {Array<Array<number>>} matrix
+ * @param {Array<number>} vector
+ * @returns {Array<number>|null} Solution, or null when the system is singular.
+ */
+function solveLinearSystem(matrix, vector) {
+  const size = vector.length;
+  const rows = matrix.map((row, index) => [...row, vector[index]]);
+
+  for (let col = 0; col < size; col++) {
+    let pivot = col;
+    for (let row = col + 1; row < size; row++) {
+      if (Math.abs(rows[row][col]) > Math.abs(rows[pivot][col])) {
+        pivot = row;
+      }
+    }
+    if (Math.abs(rows[pivot][col]) < PIVOT_EPSILON) {
+      return null;
+    }
+    [rows[col], rows[pivot]] = [rows[pivot], rows[col]];
+    for (let row = 0; row < size; row++) {
+      if (row === col) continue;
+      const factor = rows[row][col] / rows[col][col];
+      for (let k = col; k <= size; k++) {
+        rows[row][k] -= factor * rows[col][k];
+      }
+    }
+  }
+
+  return rows.map((row, index) => row[size] / row[index]);
+}
+
+/**
+ * Mean geographic position of the points a model is fitted from. Sharing one
+ * origin keeps every model's coefficients in the same metric plane.
+ * @param {Array} points
+ * @returns {Object} {lon0, lat0}
+ */
+function fitOrigin(points) {
+  let lon = 0;
+  let lat = 0;
+  for (const point of points) {
+    lon += point.lon;
+    lat += point.lat;
+  }
+  return { lon0: lon / points.length, lat0: lat / points.length };
+}
+
+/**
+ * Compute similarity transform (2 points): uniform scale, rotation and
+ * translation, fitted in the local metric plane about the midpoint.
  * @param {Array} referencePoints - [{imageX, imageY, lon, lat}, ...]
- * @returns {Object} Transform parameters {scale, rotation, tx, ty, lon0, lat0}
- *   where scale is metres per pixel and tx/ty are metres.
+ * @returns {Object} Transform {m, type, lon0, lat0}
  */
 export function computeSimilarityTransform(referencePoints) {
   if (referencePoints.length < 2) {
     throw new Error('Need at least 2 reference points');
   }
 
-  const p1 = referencePoints[0];
-  const p2 = referencePoints[1];
-
-  // A similarity is isotropic, so it only has a solution in a plane where
-  // ground distance is isotropic: local east/north metres, not degrees.
-  const lon0 = (p1.lon + p2.lon) / 2;
-  const lat0 = (p1.lat + p2.lat) / 2;
+  const [p1, p2] = referencePoints;
+  const { lon0, lat0 } = fitOrigin([p1, p2]);
 
   const m1 = lonLatToLocalMeters(p1.lon, p1.lat, lon0, lat0);
   const m2 = lonLatToLocalMeters(p2.lon, p2.lat, lon0, lat0);
 
-  // Image space vector
-  const dx_img = p2.imageX - p1.imageX;
-  const dy_img = p2.imageY - p1.imageY;
+  const dxImage = p2.imageX - p1.imageX;
+  const dyImage = p2.imageY - p1.imageY;
+  const dxMetric = m2.east - m1.east;
+  const dyMetric = m2.north - m1.north;
 
-  // Metric space vector
-  const dx_metric = m2.east - m1.east;
-  const dy_metric = m2.north - m1.north;
+  const distanceImage = Math.hypot(dxImage, dyImage);
+  const distanceMetric = Math.hypot(dxMetric, dyMetric);
+  if (!(distanceImage > 0) || !(distanceMetric > 0)) {
+    throw new Error('Reference points must be distinct');
+  }
 
-  // Calculate scale (metres per pixel)
-  const dist_img = Math.sqrt(dx_img * dx_img + dy_img * dy_img);
-  const dist_metric = Math.sqrt(dx_metric * dx_metric + dy_metric * dy_metric);
-  const scale = dist_metric / dist_img;
+  // Metres per pixel, and the rotation aligning the image to the metric plane.
+  const scale = distanceMetric / distanceImage;
+  const rotation = Math.atan2(dyMetric, dxMetric) - Math.atan2(dyImage, dxImage);
+  const cos = Math.cos(rotation);
+  const sin = Math.sin(rotation);
 
-  // Calculate rotation
-  const angle_img = Math.atan2(dy_img, dx_img);
-  const angle_metric = Math.atan2(dy_metric, dx_metric);
-  const rotation = angle_metric - angle_img;
-
-  // Calculate translation using first point
-  const cos_r = Math.cos(rotation);
-  const sin_r = Math.sin(rotation);
-  const tx = m1.east - (scale * cos_r * p1.imageX - scale * sin_r * p1.imageY);
-  const ty = m1.north - (scale * sin_r * p1.imageX + scale * cos_r * p1.imageY);
-
-  return { scale, rotation, tx, ty, lon0, lat0 };
+  return {
+    m: [
+      scale * cos, -scale * sin, m1.east - (scale * cos * p1.imageX - scale * sin * p1.imageY),
+      scale * sin, scale * cos, m1.north - (scale * sin * p1.imageX + scale * cos * p1.imageY),
+      0, 0, 1,
+    ],
+    type: 'similarity',
+    lon0,
+    lat0,
+  };
 }
 
 /**
- * Compute affine transform using transformation-matrix library
- * Uses fromTriangles to compute transform from reference points
- * Transformation: lon = a*x + b*y + c
- *                 lat = d*x + e*y + f
+ * Compute affine transform (3 points), fitted in the local metric plane.
  * @param {Array} referencePoints - [{imageX, imageY, lon, lat}, ...]
- * @returns {Object} Transform parameters {a, b, c, d, e, f}
+ * @returns {Object} Transform {m, type, lon0, lat0}
  */
 export function computeAffineTransform(referencePoints) {
   if (referencePoints.length < 3) {
     throw new Error('Need at least 3 reference points for affine transform');
   }
 
-  // TODO: this is using just 3 arbitrary points, we want to switch to a mesh instead
-  // Use the first 3 non-collinear points to compute the transform
-  // fromTriangles expects triangles as arrays of points
-  const imageTriangle = referencePoints.slice(0, 3).map(p => [p.imageX, p.imageY]);
-  const geoTriangle = referencePoints.slice(0, 3).map(p => [p.lon, p.lat]);
-  
-  const matrix = fromTriangles(imageTriangle, geoTriangle);
+  const used = referencePoints.slice(0, 3);
+  const { lon0, lat0 } = fitOrigin(used);
+  const rows = [];
+  const values = [];
 
-  if ([matrix.a, matrix.b, matrix.c, matrix.d, matrix.e, matrix.f].some(value => !Number.isFinite(value))) {
+  for (const point of used) {
+    const { east, north } = lonLatToLocalMeters(point.lon, point.lat, lon0, lat0);
+    rows.push([point.imageX, point.imageY, 1, 0, 0, 0]);
+    values.push(east);
+    rows.push([0, 0, 0, point.imageX, point.imageY, 1]);
+    values.push(north);
+  }
+
+  // The system is singular exactly when the image points are collinear.
+  const solution = solveLinearSystem(rows, values);
+  if (!solution) {
     throw new Error('Points are collinear, cannot compute affine transform');
   }
 
-  // Extract coefficients from the matrix
-  // The matrix format is: [a, b,  0, c, d,  0, e, f,  1]
-  // But transformation-matrix uses: [a, c, e, b, d, f,  0,  0,  1]
-  return {
-    a: matrix.a,
-    b: matrix.c,
-    c: matrix.e,
-    d: matrix.b,
-    e: matrix.d,
-    f: matrix.f
-  };
+  const [a, b, c, d, e, f] = solution;
+  return { m: [a, b, c, d, e, f, 0, 0, 1], type: 'affine', lon0, lat0 };
 }
 
 /**
- * Transform image coordinates to geographic coordinates
- * @param {number} imageX 
- * @param {number} imageY 
- * @param {Object} transform - Transform parameters
- * @param {string} type - 'similarity' or 'affine'
+ * Compute a homography (4 points) by direct linear transform, fitted in the
+ * local metric plane with the matrix normalized so m8 = 1.
+ * @param {Array} referencePoints - [{imageX, imageY, lon, lat}, ...]
+ * @returns {Object} Transform {m, type, lon0, lat0}
+ */
+export function computeHomographyTransform(referencePoints) {
+  if (referencePoints.length < 4) {
+    throw new Error('Need at least 4 reference points for homography transform');
+  }
+
+  const used = referencePoints.slice(0, 4);
+  const { lon0, lat0 } = fitOrigin(used);
+  const rows = [];
+  const values = [];
+
+  for (const point of used) {
+    const { east, north } = lonLatToLocalMeters(point.lon, point.lat, lon0, lat0);
+    const { imageX, imageY } = point;
+    rows.push([imageX, imageY, 1, 0, 0, 0, -imageX * east, -imageY * east]);
+    values.push(east);
+    rows.push([0, 0, 0, imageX, imageY, 1, -imageX * north, -imageY * north]);
+    values.push(north);
+  }
+
+  // Singular when the four points are degenerate (e.g. three of them collinear).
+  const solution = solveLinearSystem(rows, values);
+  if (!solution) {
+    throw new Error('Points are degenerate, cannot compute homography transform');
+  }
+
+  const m = [...solution, 1];
+  if (!m.every(Number.isFinite)) {
+    throw new Error('Points are degenerate, cannot compute homography transform');
+  }
+  return { m, type: 'homography', lon0, lat0 };
+}
+
+/**
+ * Transform image coordinates to geographic coordinates.
+ * @param {number} imageX
+ * @param {number} imageY
+ * @param {Object} transform - Transform object {m, type, lon0, lat0}
  * @returns {Object} {lon, lat}
  */
-export function imageToGeo(imageX, imageY, transform, type) {
-  if (type === 'similarity') {
-    const { scale, rotation, tx, ty, lon0, lat0 } = transform;
-    const cos_r = Math.cos(rotation);
-    const sin_r = Math.sin(rotation);
-    const east = scale * cos_r * imageX - scale * sin_r * imageY + tx;
-    const north = scale * sin_r * imageX + scale * cos_r * imageY + ty;
-    return localMetersToLonLat(east, north, lon0, lat0);
-  } else if (type === 'affine') {
-    const { a, b, c, d, e, f } = transform;
-    const lon = a * imageX + b * imageY + c;
-    const lat = d * imageX + e * imageY + f;
-    return { lon, lat };
+export function imageToGeo(imageX, imageY, transform) {
+  const local = applyMatrix(transform.m, imageX, imageY);
+  if (!local) {
+    throw new Error('Transform is singular');
   }
-  throw new Error('Unknown transform type');
+  return localMetersToLonLat(local.x, local.y, transform.lon0, transform.lat0);
 }
 
 /**
- * Transform geographic coordinates to image coordinates
- * @param {number} lon 
- * @param {number} lat 
- * @param {Object} transform - Transform parameters
- * @param {string} type - 'similarity' or 'affine'
- * @returns {Object} {imageX, imageY}
- */
-export function geoToImage(lon, lat, transform, type) {
-  if (type === 'similarity') {
-    const { scale, rotation, tx, ty, lon0, lat0 } = transform;
-    const cos_r = Math.cos(rotation);
-    const sin_r = Math.sin(rotation);
-
-    // Inverse transformation in the local metric plane
-    const { east, north } = lonLatToLocalMeters(lon, lat, lon0, lat0);
-    const east_shifted = east - tx;
-    const north_shifted = north - ty;
-    const imageX = (cos_r * east_shifted + sin_r * north_shifted) / scale;
-    const imageY = (-sin_r * east_shifted + cos_r * north_shifted) / scale;
-    return { imageX, imageY };
-  } else if (type === 'affine') {
-    const { a, b, c, d, e, f } = transform;
-    
-    // Create transformation matrix and use library's inverse function
-    const matrix = { a, b: d, c: b, d: e, e: c, f };
-    const inverseMatrix = inverse(matrix);
-    
-    if (!inverseMatrix || ![inverseMatrix.a, inverseMatrix.b, inverseMatrix.c, inverseMatrix.d, inverseMatrix.e, inverseMatrix.f].every(Number.isFinite)) {
-      throw new Error('Transform is singular');
-    }
-    
-    // Apply inverse transformation
-    const result = applyToPoint(inverseMatrix, { x: lon, y: lat });
-    return { imageX: result.x, imageY: result.y };
-  }
-  throw new Error('Unknown transform type');
-}
-
-/**
- * Local metric origin used to measure a ground offset: the fitted projection
- * origin for a similarity, otherwise the point being measured.
- * @param {Object} transform
- * @param {string} type - 'similarity' or 'affine'
+ * Transform geographic coordinates to image coordinates.
  * @param {number} lon
  * @param {number} lat
- * @returns {Object} {lon0, lat0}
+ * @param {Object} transform - Transform object {m, type, lon0, lat0}
+ * @returns {Object} {imageX, imageY}
  */
-function distanceOrigin(transform, type, lon, lat) {
-  if (type === 'similarity') {
-    return { lon0: transform.lon0, lat0: transform.lat0 };
+export function geoToImage(lon, lat, transform) {
+  const inverseMatrix = invertMatrix(transform.m);
+  if (!inverseMatrix) {
+    throw new Error('Transform is singular');
   }
-  return { lon0: lon, lat0: lat };
+  const local = lonLatToLocalMeters(lon, lat, transform.lon0, transform.lat0);
+  const image = applyMatrix(inverseMatrix, local.east, local.north);
+  if (!image) {
+    throw new Error('Transform is singular');
+  }
+  return { imageX: image.x, imageY: image.y };
 }
 
 /**
@@ -230,13 +309,12 @@ function distanceOrigin(transform, type, lon, lat) {
  * @param {number} lon
  * @param {number} lat
  * @param {number} meters
- * @param {Object} transform - Transform parameters
- * @param {string} type - 'similarity' or 'affine'
+ * @param {Object} transform - Transform object {m, type, lon0, lat0}
  * @returns {number} Distance in image pixels
  */
-export function geoDistanceToImagePixels(lon, lat, meters, transform, type) {
+export function geoDistanceToImagePixels(lon, lat, meters, transform) {
+  const { lon0, lat0 } = transform;
   const component = meters / Math.SQRT2;
-  const { lon0, lat0 } = distanceOrigin(transform, type, lon, lat);
   const local = lonLatToLocalMeters(lon, lat, lon0, lat0);
   const offset = localMetersToLonLat(
     local.east + component,
@@ -245,30 +323,27 @@ export function geoDistanceToImagePixels(lon, lat, meters, transform, type) {
     lat0
   );
 
-  const start = geoToImage(lon, lat, transform, type);
-  const end = geoToImage(offset.lon, offset.lat, transform, type);
+  const start = geoToImage(lon, lat, transform);
+  const end = geoToImage(offset.lon, offset.lat, transform);
   return Math.hypot(end.imageX - start.imageX, end.imageY - start.imageY);
 }
 
 /**
- * Calculate the appropriate transform based on number of reference points
- * @param {Array} referencePoints 
- * @returns {Object} {transform, type} or null if insufficient points
+ * Fit the appropriate model for the number of reference points available:
+ * two -> similarity, three -> affine, four -> homography. Extra points are
+ * not used yet; a least-squares fit is future work.
+ * @param {Array} referencePoints
+ * @returns {Object|null} Transform object, or null if fewer than two points.
  */
 export function calculateTransform(referencePoints) {
   if (!referencePoints || referencePoints.length < 2) {
     return null;
   }
-
   if (referencePoints.length === 2) {
-    return {
-      transform: computeSimilarityTransform(referencePoints),
-      type: 'similarity'
-    };
-  } else {
-    return {
-      transform: computeAffineTransform(referencePoints),
-      type: 'affine'
-    };
+    return computeSimilarityTransform(referencePoints);
   }
+  if (referencePoints.length === 3) {
+    return computeAffineTransform(referencePoints);
+  }
+  return computeHomographyTransform(referencePoints);
 }

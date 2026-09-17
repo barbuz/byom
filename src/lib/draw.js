@@ -7,8 +7,8 @@ export function applyImageTransform(ctx, transform, imageWidth, imageHeight) {
   ctx.translate(-imageWidth / 2, -imageHeight / 2);
 }
 
-function drawAccuracyRing(ctx, point, geoTransform, geoTransformType) {
-  const accuracyRadius = geoDistanceToImagePixels(point.lon, point.lat, point.accuracy, geoTransform, geoTransformType);
+function drawAccuracyRing(ctx, point, geoTransform) {
+  const accuracyRadius = geoDistanceToImagePixels(point.lon, point.lat, point.accuracy, geoTransform);
   ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
   ctx.strokeStyle = 'rgba(33, 150, 243, 0.35)';
   ctx.lineWidth = 2;
@@ -19,7 +19,7 @@ function drawAccuracyRing(ctx, point, geoTransform, geoTransformType) {
 }
 
 export function drawReferencePoints(ctx, points, transform, imageWidth, imageHeight, options) {
-  const { showingPoints = false, editingPointId = null, hoverPointIndex = -1, scale = transform.scale, geoTransform = null, geoTransformType = null } = { ...options };
+  const { showingPoints = false, editingPointId = null, hoverPointIndex = -1, scale = transform.scale, geoTransform = null } = { ...options };
 
   points.forEach((point, index) => {
     const isHovered = hoverPointIndex === index;
@@ -28,7 +28,7 @@ export function drawReferencePoints(ctx, points, transform, imageWidth, imageHei
     if (!showingPoints && !isEditing) return;
 
     if (point.accuracy && geoTransform) {
-      drawAccuracyRing(ctx, point, geoTransform, geoTransformType);
+      drawAccuracyRing(ctx, point, geoTransform);
     }
 
     ctx.fillStyle = isEditing ? 'rgba(255, 152, 0, 0.9)' : isHovered ? 'rgba(33, 150, 243, 0.9)' : 'rgba(33, 150, 243, 0.7)';
@@ -78,17 +78,17 @@ export function drawPendingPoint(ctx, pendingPoint, transform, imageWidth, image
   ctx.stroke();
 }
 
-export function drawUserMarker(ctx, position, geoTransform, geoTransformType, transform, imageWidth, imageHeight) {
+export function drawUserMarker(ctx, position, geoTransform, transform, imageWidth, imageHeight) {
   if (!position || !geoTransform) return;
 
   try {
-    const imgCoords =	geoToImage(position.longitude, position.latitude, geoTransform, geoTransformType);
+    const imgCoords =	geoToImage(position.longitude, position.latitude, geoTransform);
 
     ctx.save();
     applyImageTransform(ctx, transform, imageWidth, imageHeight);
 
     if (position.accuracy) {
-      const accuracyInPixels =	geoDistanceToImagePixels(position.longitude, position.latitude, position.accuracy, geoTransform, geoTransformType);
+      const accuracyInPixels =	geoDistanceToImagePixels(position.longitude, position.latitude, position.accuracy, geoTransform);
 
       ctx.strokeStyle =	'rgba(175, 76, 80, 0.4)';
       ctx.fillStyle =	'rgba(175, 76, 80, 0.15)';

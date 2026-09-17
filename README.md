@@ -11,7 +11,7 @@ A Progressive Web App for georeferencing map photos and viewing your GPS locatio
 - 🔄 **Works offline** with IndexedDB storage
 - 🗺️ **Uses OpenStreetMap** for coordinate selection
 - ⚡ **No server required** - completely serverless PWA
-- 🎯 **High accuracy** - affine transform with 3+ reference points
+- 🎯 **High accuracy** - similarity, affine or homography transform by point count
 
 ## 🚀 Quick Start
 
@@ -52,10 +52,12 @@ Once reference points are set, your GPS position appears on the map image automa
 
 ## 🔬 Transform Methods
 
-The app uses different mathematical transformations based on the number of reference points:
+The app uses different mathematical transformations based on the number of reference points. All three share the same representation - a 3x3 homogeneous matrix mapping image pixels to local east/north metres, plus the metric plane's origin - and are fitted in that metric plane rather than raw degrees, so they stay accurate at any latitude and map rotation.
 
-- **2 points**: Similarity transform (translation, rotation, uniform scale). Fitted in a local east/north metre plane rather than raw degrees, so it stays accurate at any latitude and map rotation.
-- **3+ points**: Affine transform (least-squares fit for best accuracy)
+- **2 points**: Similarity transform (translation, rotation, uniform scale).
+- **3 points**: Affine transform (adds independent x/y scale and shear).
+- **4 points**: Homography, fitted by direct linear transform. Handles the perspective of a photographed map, which the affine cannot; on an unrotated Mercator image the projective terms vanish and it agrees with the affine.
+- **5+ points**: Not yet used - fitting is exact at 2/3/4 points, and extra points are ignored pending a least-squares fit.
 
 ## 📁 Project Structure
 
