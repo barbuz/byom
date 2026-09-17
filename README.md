@@ -54,7 +54,7 @@ Once reference points are set, your GPS position appears on the map image automa
 
 The app uses different mathematical transformations based on the number of reference points:
 
-- **2 points**: Similarity transform (translation, rotation, uniform scale)
+- **2 points**: Similarity transform (translation, rotation, uniform scale). Fitted in a local east/north metre plane rather than raw degrees, so it stays accurate at any latitude and map rotation.
 - **3+ points**: Affine transform (least-squares fit for best accuracy)
 
 ## 📁 Project Structure
