@@ -18,6 +18,8 @@
 const METERS_PER_DEG_LAT = 111320;
 const DEG_TO_RAD = Math.PI / 180;
 const PIVOT_EPSILON = 1e-12;
+const HALF_TURN = 180;
+const FULL_TURN = 360;
 
 /**
  * Metres spanned by one degree of longitude at the given latitude.
@@ -26,6 +28,22 @@ const PIVOT_EPSILON = 1e-12;
  */
 export function metersPerDegreeLon(lat) {
   return METERS_PER_DEG_LAT * Math.cos(lat * DEG_TO_RAD);
+}
+
+/**
+ * Wrap a longitude (or a longitude difference) into [-180, 180). Longitudes
+ * are cyclic, so a naive linearisation of a map crossing the antimeridian
+ * spans ~20,000 km for neighbouring points.
+ * @param {number} lon
+ * @returns {number}
+ */
+export function wrapLongitude(lon) {
+  // Short-circuit in-range values: the modulo below is exact for them but
+  // rounds at a magnitude of 180, which would perturb every ordinary fit.
+  if (lon >= -HALF_TURN && lon < HALF_TURN) {
+    return lon;
+  }
+  return ((lon + HALF_TURN) % FULL_TURN + FULL_TURN) % FULL_TURN - HALF_TURN;
 }
 
 /**
@@ -40,7 +58,7 @@ export function metersPerDegreeLon(lat) {
  */
 export function lonLatToLocalMeters(lon, lat, lon0, lat0) {
   return {
-    east: (lon - lon0) * metersPerDegreeLon(lat0),
+    east: wrapLongitude(lon - lon0) * metersPerDegreeLon(lat0),
     north: (lat - lat0) * METERS_PER_DEG_LAT,
   };
 }
@@ -55,7 +73,7 @@ export function lonLatToLocalMeters(lon, lat, lon0, lat0) {
  */
 export function localMetersToLonLat(east, north, lon0, lat0) {
   return {
-    lon: lon0 + east / metersPerDegreeLon(lat0),
+    lon: wrapLongitude(lon0 + east / metersPerDegreeLon(lat0)),
     lat: lat0 + north / METERS_PER_DEG_LAT,
   };
 }
@@ -134,19 +152,105 @@ function solveLinearSystem(matrix, vector) {
 }
 
 /**
+ * Hartley isotropic normalization for a set of 2D points: translate their
+ * centroid to the origin and scale so their mean distance from it is sqrt(2).
+ *
+ * A DLT design matrix built from raw pixels and metres is badly conditioned
+ * and the condition number grows with map size (measured cond ~2.5e7 at
+ * 1,000 px and ~3.6e9 at 12,000 px for a 1,000 km map); normalizing both
+ * planes collapses it to a constant ~3.1. The raw solve is still accurate at
+ * these scales, so this is robustness rather than a user-visible fix, but it
+ * removes the dependence on resolution and keeps precision for the planned
+ * least-squares fit, whose normal equations would square the condition number.
+ * @param {Array} points - [{x, y}, ...]
+ * @returns {Object} {points, matrix, inverseMatrix} - Normalized points and
+ *   the 3x3 transforms into and out of the normalized frame.
+ */
+function normalizePoints(points) {
+  let cx = 0;
+  let cy = 0;
+  for (const point of points) {
+    cx += point.x;
+    cy += point.y;
+  }
+  cx /= points.length;
+  cy /= points.length;
+
+  let meanDistance = 0;
+  for (const point of points) {
+    meanDistance += Math.hypot(point.x - cx, point.y - cy);
+  }
+  meanDistance /= points.length;
+  const scale = meanDistance > 0 ? Math.SQRT2 / meanDistance : 1;
+
+  return {
+    points: points.map(({ x, y }) => ({ x: (x - cx) * scale, y: (y - cy) * scale })),
+    matrix: [scale, 0, -scale * cx, 0, scale, -scale * cy, 0, 0, 1],
+    inverseMatrix: [1 / scale, 0, cx, 0, 1 / scale, cy, 0, 0, 1],
+  };
+}
+
+/**
+ * Multiply two row-major 3x3 matrices.
+ * @param {Array<number>} a
+ * @param {Array<number>} b
+ * @returns {Array<number>}
+ */
+function multiplyMatrices(a, b) {
+  const result = new Array(9);
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 3; col++) {
+      result[row * 3 + col] =
+        a[row * 3] * b[col] + a[row * 3 + 1] * b[3 + col] + a[row * 3 + 2] * b[6 + col];
+    }
+  }
+  return result;
+}
+
+/**
  * Mean geographic position of the points a model is fitted from. Sharing one
- * origin keeps every model's coefficients in the same metric plane.
+ * origin keeps every model's coefficients in the same metric plane. There is
+ * no fitting here: it is a plain mean, so the name says so.
+ *
+ * Longitudes are averaged as wrapped offsets from the first point, so a map
+ * that crosses the antimeridian yields an origin next to the map rather than
+ * on the opposite side of the planet. Callers must pass finite coordinates.
  * @param {Array} points
  * @returns {Object} {lon0, lat0}
  */
-function fitOrigin(points) {
-  let lon = 0;
+export function planeOrigin(points) {
+  if (points.length === 0) {
+    throw new Error('Cannot compute a plane origin from no points');
+  }
+
+  const referenceLon = points[0].lon;
+  let lonOffset = 0;
   let lat = 0;
   for (const point of points) {
-    lon += point.lon;
+    lonOffset += wrapLongitude(point.lon - referenceLon);
     lat += point.lat;
   }
-  return { lon0: lon / points.length, lat0: lat / points.length };
+  return {
+    lon0: wrapLongitude(referenceLon + lonOffset / points.length),
+    lat0: lat / points.length,
+  };
+}
+
+/**
+ * Reject reference points whose image or geographic coordinates cannot be
+ * projected. A null coordinate would otherwise coerce to a number and yield a
+ * finite but wrong transform, and undefined would propagate NaN.
+ * @param {Array} points
+ */
+function assertFinitePoints(points) {
+  for (const point of points) {
+    if (
+      !Number.isFinite(point.imageX) || !Number.isFinite(point.imageY) ||
+      !Number.isFinite(point.lon) || !Number.isFinite(point.lat)
+    ) {
+      throw new Error('Reference points must have finite coordinates');
+    }
+  }
 }
 
 /**
@@ -161,7 +265,8 @@ export function computeSimilarityTransform(referencePoints) {
   }
 
   const [p1, p2] = referencePoints;
-  const { lon0, lat0 } = fitOrigin([p1, p2]);
+  assertFinitePoints([p1, p2]);
+  const { lon0, lat0 } = planeOrigin([p1, p2]);
 
   const m1 = lonLatToLocalMeters(p1.lon, p1.lat, lon0, lat0);
   const m2 = lonLatToLocalMeters(p2.lon, p2.lat, lon0, lat0);
@@ -206,7 +311,8 @@ export function computeAffineTransform(referencePoints) {
   }
 
   const used = referencePoints.slice(0, 3);
-  const { lon0, lat0 } = fitOrigin(used);
+  assertFinitePoints(used);
+  const { lon0, lat0 } = planeOrigin(used);
   const rows = [];
   const values = [];
 
@@ -231,6 +337,10 @@ export function computeAffineTransform(referencePoints) {
 /**
  * Compute a homography (4 points) by direct linear transform, fitted in the
  * local metric plane with the matrix normalized so m8 = 1.
+ *
+ * Both planes are Hartley-normalized before the solve and the result is
+ * denormalized afterwards, which keeps the DLT design matrix well conditioned
+ * regardless of map size and resolution.
  * @param {Array} referencePoints - [{imageX, imageY, lon, lat}, ...]
  * @returns {Object} Transform {m, type, lon0, lat0}
  */
@@ -240,13 +350,22 @@ export function computeHomographyTransform(referencePoints) {
   }
 
   const used = referencePoints.slice(0, 4);
-  const { lon0, lat0 } = fitOrigin(used);
+  assertFinitePoints(used);
+  const { lon0, lat0 } = planeOrigin(used);
+
+  const imagePoints = used.map(({ imageX, imageY }) => ({ x: imageX, y: imageY }));
+  const metricPoints = used.map((point) =>
+    lonLatToLocalMeters(point.lon, point.lat, lon0, lat0)
+  );
+  const image = normalizePoints(imagePoints);
+  const metric = normalizePoints(metricPoints.map(({ east, north }) => ({ x: east, y: north })));
+
   const rows = [];
   const values = [];
 
-  for (const point of used) {
-    const { east, north } = lonLatToLocalMeters(point.lon, point.lat, lon0, lat0);
-    const { imageX, imageY } = point;
+  for (let i = 0; i < used.length; i++) {
+    const { x: imageX, y: imageY } = image.points[i];
+    const { x: east, y: north } = metric.points[i];
     rows.push([imageX, imageY, 1, 0, 0, 0, -imageX * east, -imageY * east]);
     values.push(east);
     rows.push([0, 0, 0, imageX, imageY, 1, -imageX * north, -imageY * north]);
@@ -259,11 +378,18 @@ export function computeHomographyTransform(referencePoints) {
     throw new Error('Points are degenerate, cannot compute homography transform');
   }
 
-  const m = [...solution, 1];
-  if (!m.every(Number.isFinite)) {
+  const normalized = [...solution, 1];
+  const m = multiplyMatrices(
+    metric.inverseMatrix,
+    multiplyMatrices(normalized, image.matrix)
+  );
+
+  // The denormalized matrix is only defined up to scale; restore the m8 = 1
+  // convention the rest of the code assumes.
+  if (!m.every(Number.isFinite) || Math.abs(m[8]) < PIVOT_EPSILON) {
     throw new Error('Points are degenerate, cannot compute homography transform');
   }
-  return { m, type: 'homography', lon0, lat0 };
+  return { m: m.map(value => value / m[8]), type: 'homography', lon0, lat0 };
 }
 
 /**

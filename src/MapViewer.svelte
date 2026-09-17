@@ -529,9 +529,21 @@
     scheduleRender();
   }
 
+  function isValidCoordinate(lat, lon) {
+    return Number.isFinite(lat) && Number.isFinite(lon) &&
+      lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
+  }
+
   async function saveEditedPoint() {
     if (!editingPoint) return;
-    
+
+    // An emptied numeric field binds to null/undefined; persisting that would
+    // leave the map unloadable once the fitters reject the point.
+    if (!isValidCoordinate(editingPoint.lat, editingPoint.lon)) {
+      alert('Latitude must be between -90 and 90 and longitude between -180 and 180');
+      return;
+    }
+
     try {
       const { updateReferencePoint } = await import('./lib/db.js');
       await updateReferencePoint(editingPoint.id, {

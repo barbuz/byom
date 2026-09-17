@@ -59,6 +59,10 @@ The app uses different mathematical transformations based on the number of refer
 - **4 points**: Homography, fitted by direct linear transform. Handles the perspective of a photographed map, which the affine cannot; on an unrotated Mercator image the projective terms vanish and it agrees with the affine.
 - **5+ points**: Not yet used - fitting is exact at 2/3/4 points, and extra points are ignored pending a least-squares fit.
 
+The homography fit Hartley-normalizes both planes (centroids to the origin, mean distance to sqrt(2)) before solving and denormalizes afterwards. A raw DLT on pixels and metres has a condition number that grows with map size (cond ~2.5e7 at 1,000 px, ~3.6e9 at 12,000 px); normalizing holds it at a constant ~3.1, independent of size. The raw solve is still accurate at these scales (measured error ~1.5e-11 m at 12,000 px, far below hand-picked-point noise), so this is robustness rather than a user-visible fix - but it removes the dependence on map resolution and protects the planned least-squares fit, which would square the condition number if built via normal equations. No third-party matrix library is used: the hand-rolled solvers match numpy to ~1e-15 degrees and the app is offline-first, so a dependency such as mathjs (712 KB min) is not worth it.
+
+Longitudes are wrapped into `[-180, 180)` when projecting, so a map crossing the antimeridian fits correctly instead of being linearised the long way round the globe. Reference points with missing or non-finite coordinates are rejected rather than silently producing a wrong transform.
+
 ## 📁 Project Structure
 
 ```
@@ -195,7 +199,7 @@ npm run test:coverage    # vitest run --coverage, enforces coverage thresholds
 | `src/lib/draw.js` | 100% |
 | `src/lib/db.js` | 100% |
 | `src/components/UserPositionMarker.svelte` | 100% |
-| `src/MapViewer.svelte` | 68% |
+| `src/MapViewer.svelte` | 74% |
 | `src/MapList.svelte` | 62% |
 
 `reportOnFailure` is enabled, so a threshold failure still produces a report to help diagnose regressions. A run that misses a threshold exits non-zero and breaks CI.

@@ -102,6 +102,8 @@ beforeEach(() => {
   getMap.mockReset();
   getReferencePoints.mockReset();
   addReferencePoint.mockReset();
+  updateReferencePoint.mockReset();
+  deleteReferencePoint.mockReset();
   getMap.mockResolvedValue({ id: 1, imageBlob: { blob: true } });
   getReferencePoints.mockResolvedValue([]);
   vi.stubGlobal("Image", MapImage);
@@ -310,5 +312,70 @@ describe("MapViewer GPS flows", () => {
     assert.equal(args.lat, 40.7128);
     assert.equal(args.accuracy, 10);
     assert.ok(!screen.queryByText("Use GPS"));
+  });
+});
+
+describe("MapViewer point editing", () => {
+  // The component sizes the canvas to the viewport and fits the 800x600
+  // image into it, so the first reference point is not at its raw pixel
+  // position on screen. Replicate that fit to find where to click.
+  async function openEditModal() {
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+    fireEvent.click(screen.getByText(/Points \(2\)/));
+    await flushPromises();
+
+    const canvasWidth = window.innerWidth;
+    const canvasHeight = window.innerHeight;
+    const scale = Math.min(canvasWidth / 800, canvasHeight / 600) * 0.9;
+    const screenX = canvasWidth / 2 + (100 - 400) * scale;
+    const screenY = canvasHeight / 2 + (100 - 300) * scale;
+    clickCanvasAt(screenX, screenY);
+    await flushPromises();
+    await screen.findByText(/Edit Point #1/);
+  }
+
+  it("persists edited coordinates through the db layer", async () => {
+    await openEditModal();
+
+    await fireEvent.input(screen.getByLabelText("Latitude"), { target: { value: "41.5" } });
+    await fireEvent.input(screen.getByLabelText("Longitude"), { target: { value: "-72.25" } });
+    fireEvent.click(screen.getByText("Save"));
+    await flushPromises();
+
+    assert.equal(updateReferencePoint.mock.calls.length, 1);
+    const [id, changes] = updateReferencePoint.mock.calls[0];
+    assert.equal(id, 1);
+    assert.equal(changes.lat, 41.5);
+    assert.equal(changes.lon, -72.25);
+    assert.equal(screen.queryByText(/Edit Point #1/), null);
+  });
+
+  it("refuses an emptied coordinate instead of persisting an unusable point", async () => {
+    await openEditModal();
+
+    // Clearing a number input binds null; saving that would make the map
+    // unloadable once the transform fitters reject the point.
+    await fireEvent.input(screen.getByLabelText("Latitude"), { target: { value: "" } });
+    await fireEvent.input(screen.getByLabelText("Longitude"), { target: { value: "-72.25" } });
+    fireEvent.click(screen.getByText("Save"));
+    await flushPromises();
+
+    assert.equal(updateReferencePoint.mock.calls.length, 0);
+    assert.equal(window.alert.mock.calls.length, 1);
+    assert.match(window.alert.mock.calls[0][0], /Latitude must be between/);
+    // The modal stays open so the user can correct the field.
+    assert.ok(screen.queryByText(/Edit Point #1/));
+  });
+
+  it("refuses out-of-range coordinates", async () => {
+    await openEditModal();
+
+    await fireEvent.input(screen.getByLabelText("Latitude"), { target: { value: "95" } });
+    fireEvent.click(screen.getByText("Save"));
+    await flushPromises();
+
+    assert.equal(updateReferencePoint.mock.calls.length, 0);
+    assert.equal(window.alert.mock.calls.length, 1);
   });
 });
