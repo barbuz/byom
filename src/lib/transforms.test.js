@@ -10,6 +10,8 @@ import {
   metersPerDegreeLon,
   lonLatToLocalMeters,
   localMetersToLonLat,
+  wrapLongitude,
+  planeOrigin,
 } from '../lib/transforms.js';
 
 const METERS_PER_DEG_LAT = 111320;
@@ -149,6 +151,51 @@ describe('metric helpers', () => {
     expect(metersPerDegreeLon(-60)).toBeCloseTo(METERS_PER_DEG_LAT / 2, 3);
   });
 
+  it('wrapLongitude folds any longitude into [-180, 180)', () => {
+    // In-range values must come back bit-identical: the fits depend on it.
+    expect(wrapLongitude(0)).toBe(0);
+    expect(wrapLongitude(12.3456789)).toBe(12.3456789);
+    expect(wrapLongitude(-179.9)).toBe(-179.9);
+    expect(wrapLongitude(179.9)).toBe(179.9);
+
+    expect(wrapLongitude(180)).toBe(-180);
+    expect(wrapLongitude(-180)).toBe(-180);
+    expect(wrapLongitude(181)).toBeCloseTo(-179, 9);
+    expect(wrapLongitude(-181)).toBeCloseTo(179, 9);
+    expect(wrapLongitude(360)).toBe(0);
+    expect(wrapLongitude(-360)).toBe(0);
+    expect(wrapLongitude(200.5)).toBeCloseTo(-159.5, 9);
+    expect(wrapLongitude(540)).toBe(-180);
+  });
+
+  it('planeOrigin averages plain midpoints away from the antimeridian', () => {
+    expect(planeOrigin([{ lon: 10, lat: 20 }])).toEqual({ lon0: 10, lat0: 20 });
+    const origin = planeOrigin([
+      { lon: 10, lat: 20 },
+      { lon: 12, lat: 30 },
+      { lon: 14, lat: 40 },
+    ]);
+    expect(origin.lon0).toBeCloseTo(12, 12);
+    expect(origin.lat0).toBeCloseTo(30, 12);
+    // In-range longitudes are untouched, so no rounding is introduced.
+    expect(origin.lon0).toBe(12);
+  });
+
+  it('planeOrigin keeps an antimeridian-crossing map on one side of the globe', () => {
+    // The naive mean of these two longitudes is 0.025, forcing a ~20,000 km
+    // linearisation for points ~40 km apart.
+    const origin = planeOrigin([
+      { lon: 179.9, lat: 60 },
+      { lon: -179.9, lat: 60 },
+    ]);
+    expect(Math.abs(origin.lon0)).toBe(180);
+    expect(origin.lat0).toBeCloseTo(60, 12);
+  });
+
+  it('planeOrigin throws for empty input rather than returning NaN', () => {
+    expect(() => planeOrigin([])).toThrow('Cannot compute a plane origin from no points');
+  });
+
   it('projects degrees to local east/north metres about an origin', () => {
     const local = lonLatToLocalMeters(1, 1, 0, 0);
     expect(local.east).toBeCloseTo(METERS_PER_DEG_LAT, 6);
@@ -163,6 +210,20 @@ describe('metric helpers', () => {
     const back = localMetersToLonLat(east, north, 12.0, -57.0);
     expect(back.lon).toBeCloseTo(12.34, 12);
     expect(back.lat).toBeCloseTo(-56.78, 12);
+  });
+
+  it('projects short offsets across the antimeridian without leaving the plane', () => {
+    // 179.9 and -179.9 are 0.2 degrees apart, not 359.8.
+    const a = lonLatToLocalMeters(179.9, 60, -180, 60);
+    const b = lonLatToLocalMeters(-179.9, 60, -180, 60);
+    const span = Math.hypot(a.east - b.east, a.north - b.north);
+    const expected = 0.2 * metersPerDegreeLon(60);
+    expect(span).toBeCloseTo(expected, 6);
+    expect(span).toBeLessThan(20000);
+
+    // And the inverse still lands on a valid longitude.
+    const back = localMetersToLonLat(a.east, a.north, -180, 60);
+    expect(wrapLongitude(back.lon)).toBeCloseTo(179.9, 9);
   });
 });
 
@@ -315,6 +376,20 @@ describe('computeHomographyTransform', () => {
       .toThrow('Points are degenerate, cannot compute homography transform');
   });
 
+  it('throws when a single point is repeated and normalization cannot scale', () => {
+    // All four points coincide, so the mean distance normalization would
+    // divide by zero; the guard falls back to a unit scale and the singular
+    // system is then rejected as usual.
+    const coincident = [
+      { imageX: 7, imageY: 9, lon: 1, lat: 2 },
+      { imageX: 7, imageY: 9, lon: 1, lat: 2 },
+      { imageX: 7, imageY: 9, lon: 1, lat: 2 },
+      { imageX: 7, imageY: 9, lon: 1, lat: 2 },
+    ];
+    expect(() => computeHomographyTransform(coincident))
+      .toThrow('Points are degenerate, cannot compute homography transform');
+  });
+
   it('throws when the fit overflows to a non-finite matrix', () => {
     // Enormous but finite inputs can overflow the fit into a matrix with
     // non-finite coefficients; such a transform must be rejected rather than
@@ -327,6 +402,202 @@ describe('computeHomographyTransform', () => {
     ];
     expect(() => computeHomographyTransform(overflowing))
       .toThrow('Points are degenerate, cannot compute homography transform');
+  });
+});
+
+describe('homography conditioning', () => {
+  // Ground truth is a genuine perspective divide on the metric plane, so a
+  // correct fit reproduces it exactly and a badly conditioned one drifts.
+  const perspectiveRefs = (pixelSpan) => {
+    const lon0 = 8;
+    const lat0 = 45;
+    const truth = (x, y) => {
+      const w = 1 + 2e-4 * (x / pixelSpan) + 1e-4 * (y / pixelSpan);
+      return { east: (10 * x + 2 * y) / w, north: (1 * x + 10 * y) / w };
+    };
+    const refs = [[0, 0], [pixelSpan, 0], [pixelSpan, pixelSpan], [0, pixelSpan]]
+      .map(([x, y]) => ({ imageX: x, imageY: y, ...localMetersToLonLat(truth(x, y).east, truth(x, y).north, lon0, lat0) }));
+    return { refs, truth, lon0, lat0 };
+  };
+
+  // The raw DLT design matrix grows worse conditioned with map size; Hartley
+  // normalization holds it at a constant ~2.6. These checks assert the
+  // observable consequence: the fit stays exact at 12,000 px, where a raw
+  // solve of a large map loses precision.
+  it.each([1000, 4000, 12000])('fits a %d px perspective map to float64 precision', (pixelSpan) => {
+    const { refs, truth, lon0, lat0 } = perspectiveRefs(pixelSpan);
+    const t = computeHomographyTransform(refs);
+    expectMatrixShape(t);
+
+    for (const [x, y] of [[pixelSpan / 2, pixelSpan / 2], [123, pixelSpan - 129], [0.9 * pixelSpan, 50]]) {
+      const geo = imageToGeo(x, y, t);
+      const expected = localMetersToLonLat(truth(x, y).east, truth(x, y).north, lon0, lat0);
+      expect(geo.lon).toBeCloseTo(expected.lon, 9);
+      expect(geo.lat).toBeCloseTo(expected.lat, 9);
+    }
+  });
+
+  it('keeps the coefficients finite and the projective terms physical at 12,000 px', () => {
+    const { refs } = perspectiveRefs(12000);
+    const t = computeHomographyTransform(refs);
+    // Projective terms scale as 1/span, so they are small but non-zero.
+    expect(t.m[6]).not.toBe(0);
+    expect(t.m[7]).not.toBe(0);
+    expect(Math.abs(t.m[6])).toBeLessThan(1e-6);
+    expect(Math.abs(t.m[7])).toBeLessThan(1e-6);
+    expect(t.m[8]).toBeCloseTo(1, 12);
+  });
+
+  it('agrees with the affine fit on a large, unrotated, non-perspective map', () => {
+    // The denormalized matrix must reduce to affine when there is no
+    // perspective, at the scale where conditioning used to hurt most.
+    const lon0 = 8;
+    const lat0 = 45;
+    const refs = [[0, 0], [12000, 0], [12000, 12000], [0, 12000]].map(([x, y]) => ({
+      imageX: x,
+      imageY: y,
+      ...localMetersToLonLat(3 * x, 4 * y, lon0, lat0),
+    }));
+    const homography = computeHomographyTransform(refs);
+    const affine = computeAffineTransform(refs);
+    expect(homography.m[6]).toBeCloseTo(0, 9);
+    expect(homography.m[7]).toBeCloseTo(0, 9);
+    for (const [x, y] of [[6000, 6000], [100, 11900]]) {
+      const a = imageToGeo(x, y, affine);
+      const h = imageToGeo(x, y, homography);
+      expect(h.lon).toBeCloseTo(a.lon, 9);
+      expect(h.lat).toBeCloseTo(a.lat, 9);
+    }
+  });
+});
+
+describe('antimeridian-crossing maps', () => {
+  // A 1000x800 px map spanning 0.4 degrees of longitude at 60N, centred on the
+  // date line, so its corners sit at 179.8 and -179.8 and its middle is on it.
+  const lat0 = 60;
+  const centreLon = 179.8;
+  const pxPerDegree = 1000 / 0.4;
+  const toLonLat = (x, y) => ({
+    lon: wrapLongitude(centreLon + x / pxPerDegree),
+    lat: lat0 + y / pxPerDegree,
+  });
+  const corners = [[0, 0], [1000, 0], [1000, 800], [0, 800]].map(([x, y]) => ({
+    imageX: x,
+    imageY: y,
+    ...toLonLat(x, y),
+  }));
+
+  it('spans the true 0.4 degrees rather than the long way round', () => {
+    expect(corners[0].lon).toBeCloseTo(179.8, 9);
+    expect(corners[1].lon).toBeCloseTo(-179.8, 9);
+    expect(corners[2].lon).toBeCloseTo(-179.8, 9);
+    expect(corners[3].lon).toBeCloseTo(179.8, 9);
+    // Every corner is within 0.4 degrees of every other, not 359.6.
+    for (const a of corners) {
+      for (const b of corners) {
+        expect(Math.abs(wrapLongitude(a.lon - b.lon))).toBeLessThanOrEqual(0.4 + 1e-9);
+      }
+    }
+  });
+
+  it('similarity spans the real ~20 km between points either side of the line', () => {
+    const refs = [
+      { imageX: 0, imageY: 0, lon: 179.9, lat: 60 },
+      { imageX: 1000, imageY: 0, lon: -179.9, lat: 60 },
+    ];
+    const t = computeSimilarityTransform(refs);
+    expect(t.lon0).toBe(-180);
+    expectMatrixShape(t);
+
+    // Metres per pixel is 0.2 deg of longitude at 60N over 1000 px.
+    const scale = 0.2 * metersPerDegreeLon(60) / 1000;
+    expect(t.m[0]).toBeCloseTo(scale, 6);
+
+    // No 10,000 km blow-up: the fit is exact at both reference points.
+    for (const p of refs) {
+      const img = geoToImage(p.lon, p.lat, t);
+      expect(img.imageX).toBeCloseTo(p.imageX, 6);
+      expect(img.imageY).toBeCloseTo(p.imageY, 6);
+    }
+    const mid = imageToGeo(500, 0, t);
+    expect(Math.abs(mid.lon)).toBe(180);
+    expect(mid.lat).toBeCloseTo(60, 9);
+  });
+
+  it('affine and homography map the crossing corners exactly', () => {
+    for (const t of [
+      computeAffineTransform(corners),
+      computeHomographyTransform(corners),
+    ]) {
+      expectMatrixShape(t);
+      // The origin sits inside the map's 0.2-degree span, not on the far side
+      // of the planet as a naive mean would put it.
+      expect(Math.abs(t.lon0)).toBeGreaterThan(179.8);
+      expect(Math.abs(t.lon0)).toBeLessThanOrEqual(180);
+      for (const p of corners) {
+        const geo = imageToGeo(p.imageX, p.imageY, t);
+        expect(geo.lon).toBeCloseTo(p.lon, 9);
+        expect(geo.lat).toBeCloseTo(p.lat, 9);
+      }
+      // Interior points land where the underlying pixel-to-degree map says,
+      // with 180 wrapped back to -180.
+      const interior = imageToGeo(500, 400, t);
+      expect(interior.lon).toBeCloseTo(-180, 9);
+      expect(interior.lat).toBeCloseTo(60.16, 9);
+    }
+  });
+
+  it('geoDistanceToImagePixels stays finite for a point on the line', () => {
+    const t = computeSimilarityTransform(corners.slice(0, 2));
+    const px = geoDistanceToImagePixels(-179.95, 60, 500, t);
+    expect(Number.isFinite(px)).toBe(true);
+    expect(px).toBeGreaterThan(0);
+  });
+});
+
+describe('reference point validation', () => {
+  const valid = [
+    { imageX: 0, imageY: 0, lon: 1, lat: 2 },
+    { imageX: 100, imageY: 0, lon: 3, lat: 2 },
+    { imageX: 0, imageY: 100, lon: 1, lat: 4 },
+    { imageX: 100, imageY: 100, lon: 3, lat: 4 },
+  ];
+
+  const fitters = [
+    ['similarity', (refs) => computeSimilarityTransform(refs.slice(0, 2))],
+    ['affine', (refs) => computeAffineTransform(refs.slice(0, 3))],
+    ['homography', (refs) => computeHomographyTransform(refs)],
+  ];
+
+  it.each(fitters)('%s rejects a null coordinate', (_name, fit) => {
+    // A null coordinate coerces (`null - lon0` is a number), so without a
+    // guard the fit succeeds with a plausible but wrong transform.
+    for (const field of ['lon', 'lat', 'imageX', 'imageY']) {
+      const refs = valid.map(p => ({ ...p }));
+      refs[0][field] = null;
+      expect(() => fit(refs)).toThrow('Reference points must have finite coordinates');
+    }
+  });
+
+  it.each(fitters)('%s rejects an undefined coordinate', (_name, fit) => {
+    const refs = valid.map(p => ({ ...p }));
+    delete refs[1].lon;
+    expect(() => fit(refs)).toThrow('Reference points must have finite coordinates');
+  });
+
+  it.each(fitters)('%s rejects a non-numeric coordinate', (_name, fit) => {
+    for (const bad of [NaN, Infinity, -Infinity, '12']) {
+      const refs = valid.map(p => ({ ...p }));
+      refs[1].lat = bad;
+      expect(() => fit(refs)).toThrow('Reference points must have finite coordinates');
+    }
+  });
+
+  it('leaves the extra points beyond the fit untouched by validation', () => {
+    // Only the points a model actually uses are validated, so a malformed 5th
+    // point does not break the 4-point homography.
+    const refs = [...valid, { imageX: 0, imageY: 0, lon: null, lat: null }];
+    expect(() => computeHomographyTransform(refs)).not.toThrow();
   });
 });
 

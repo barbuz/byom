@@ -57,7 +57,7 @@ export default defineConfig({
         'src/lib/draw.js': { lines:  99 },
         'src/lib/db.js': { lines:  99 },
         'src/components/UserPositionMarker.svelte': { lines:  99 },
-        'src/MapViewer.svelte': { lines:  68 },
+        'src/MapViewer.svelte': { lines:  74 },
         'src/MapList.svelte': { lines:  62 },
       },
     },
