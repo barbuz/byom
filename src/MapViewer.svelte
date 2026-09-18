@@ -38,16 +38,12 @@
   let lastTouchAngle = $state(0);
   let lastTouchCenter = $state({ x: 0, y: 0 });
   let touchStartTransform = $state(null);
-  
-  // Long touch detection
-  let longTouchTimer = $state(null);
-  let longTouchStartPos = $state(null);
-  let isLongTouch = $state(false);
 
   // Mouse interaction state
   let isMouseDown = $state(false);
   let mouseStartPos = $state(null);
   let mouseStartTransform = $state(null);
+  let mouseDragged = $state(false);
 
   // Transform state for GPS
   let geoTransform = $state(null);
@@ -304,24 +300,11 @@
 
   // Touch event handlers
   function handleTouchStart(e) {
-    e.preventDefault();
-    
     if (e.touches.length === 1) {
-      const touch = e.touches[0];
-      longTouchStartPos = { x: touch.clientX, y: touch.clientY };
-      isLongTouch = false;
-      
-      // Start long touch timer
-      longTouchTimer = setTimeout(() => {
-        isLongTouch = true;
-        handleLongPress(touch.clientX, touch.clientY);
-      }, 500); // 500ms for long touch
-      
       isPanning = true;
-      lastTouchCenter = { x: touch.clientX, y: touch.clientY };
+      lastTouchCenter = { x: e.touches[0].clientX, y: e.touches[0].clientY };
       touchStartTransform = { ...transform };
     } else if (e.touches.length === 2) {
-      clearTimeout(longTouchTimer);
       isPanning = false;
       const touch1 = e.touches[0];
       const touch2 = e.touches[1];
@@ -346,22 +329,7 @@
   }
 
   function handleTouchMove(e) {
-    e.preventDefault();
-
-    // Cancel long touch if finger moved too much
-    if (e.touches.length === 1 && longTouchStartPos) {
-      const touch = e.touches[0];
-      const moveDistance = Math.hypot(
-        touch.clientX - longTouchStartPos.x,
-        touch.clientY - longTouchStartPos.y
-      );
-      
-      if (moveDistance > 10) { // Moved more than 10px
-        clearTimeout(longTouchTimer);
-      }
-    }
-
-    if (e.touches.length === 1 && isPanning && !isLongTouch) {
+    if (e.touches.length === 1 && isPanning) {
       const touch = e.touches[0];
       const dx = touch.clientX - lastTouchCenter.x;
       const dy = touch.clientY - lastTouchCenter.y;
@@ -407,25 +375,11 @@
     }
   }
 
-  function handleTouchEnd(e) {
-    clearTimeout(longTouchTimer);
-    
-    // Handle tap for point editing (mobile)
-    if (e.changedTouches.length === 1 && !isLongTouch && showingPoints) {
-      const touch = e.changedTouches[0];
-      const rect = canvas.getBoundingClientRect();
-      const x = touch.clientX - rect.left;
-      const y = touch.clientY - rect.top;
-      
-      handlePointEditing(x, y);
-    }
-    
-    longTouchStartPos = null;
-    isLongTouch = false;
+  function handleTouchEnd() {
     isPanning = false;
   }
 
-  function handleLongPress(screenX, screenY) {
+  function startNewPoint(screenX, screenY) {
     // Convert screen coordinates to image coordinates
     const imageCoords = screenToImage(screenX, screenY, transform, imageWidth, imageHeight);
     
@@ -437,25 +391,22 @@
         screenY: screenY
       };
       
-      // Show a visual feedback
       scheduleRender();
-      
-      // Show coordinate selection modal after a short delay
-      setTimeout(() => {
-        showCoordinateSelection();
-      }, 100);
+      showCoordinateSelection();
     }
   }
 
+  /** @returns {boolean} whether an existing point was hit and opened for editing */
   function handlePointEditing(screenX, screenY) {
-    if (!showingPoints) return;
+    if (!showingPoints) return false;
     
     const pointIndex = getPointAtScreen(screenX, screenY, referencePoints, transform, imageWidth, imageHeight);
+
+    if (pointIndex < 0) return false;
     
-    if (pointIndex >= 0) {
-      editingPoint = { ...referencePoints[pointIndex], index: pointIndex };
-      scheduleRender();
-    }
+    editingPoint = { ...referencePoints[pointIndex], index: pointIndex };
+    scheduleRender();
+    return true;
   }
 
   function handleCanvasClick(e) {
@@ -463,12 +414,16 @@
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
     
-    // Handle point editing (both click and tap)
-    handlePointEditing(x, y);
-    
-    // Handle click for adding points (desktop) - only when not in edit mode
-    if (!showingPoints) {
-      handleLongPress(x, y);
+    // A mouse drag to pan still emits a trailing click; ignore it so panning
+    // never adds a point. Touch drags emit no click at all.
+    if (mouseDragged) {
+      mouseDragged = false;
+      return;
+    }
+
+    // A tap on an existing point edits it; any other tap starts a new point.
+    if (!handlePointEditing(x, y)) {
+      startNewPoint(x, y);
     }
   }
 
@@ -498,7 +453,9 @@
     if (isMouseDown && mouseStartPos) {
       const dx = x - mouseStartPos.x;
       const dy = y - mouseStartPos.y;
-      
+
+      if (Math.abs(dx) > 5 || Math.abs(dy) > 5) mouseDragged = true;
+
       transform.translateX = mouseStartTransform.translateX + dx;
       transform.translateY = mouseStartTransform.translateY + dy;
       scheduleRender();
@@ -519,6 +476,7 @@
     const y = e.clientY - rect.top;
     
     isMouseDown = true;
+    mouseDragged = false;
     mouseStartPos = { x, y };
     mouseStartTransform = { ...transform };
   }
@@ -863,10 +821,10 @@
   {#if showingPoints && referencePoints.length > 0}
     <div class="points-info">
       <div class="points-hint">
-        💡 Desktop: Click on a point to edit | Mobile: Tap on a point to edit
+        💡 Tap or click a point to edit
       </div>
       <div class="points-hint">
-        📍 Add points: Desktop: Click | Mobile: Long touch
+        📍 Add points: tap or click on the map
       </div>
       <div class="transform-status">
         {#if referencePoints.length === 2}
@@ -881,7 +839,7 @@
   {:else if !showingPoints}
     <div class="points-info">
       <div class="points-hint">
-        📍 Add reference points: Desktop: Click | Mobile: Long touch
+        📍 Add reference points: tap or click on the map
       </div>
     </div>
   {/if}

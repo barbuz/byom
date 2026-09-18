@@ -159,6 +159,78 @@ describe("MapViewer image loading", () => {
   });
 });
 
+describe("MapViewer pointer input", () => {
+  function canvas() {
+    return document.querySelector("canvas");
+  }
+
+  function touchStart(x, y) {
+    fireEvent.touchStart(canvas(), { touches: [{ clientX: x, clientY: y }] });
+  }
+
+  function touchMove(x, y) {
+    fireEvent.touchMove(canvas(), { touches: [{ clientX: x, clientY: y }] });
+  }
+
+  function touchEnd(x, y) {
+    fireEvent.touchEnd(canvas(), { changedTouches: [{ clientX: x, clientY: y }] });
+  }
+
+  it("starts a new point when the map is tapped", async () => {
+    await mountViewer();
+
+    // Browsers emit a compatibility click after a tap on a touch device.
+    touchStart(512, 384);
+    touchEnd(512, 384);
+    clickCanvasAt(512, 384);
+
+    await screen.findByText(/Add Reference Point/);
+  });
+
+  it("pans on drag without starting a new point", async () => {
+    await mountViewer();
+    await sleep(50);
+
+    // Each render emits the view translate first, then the image-centering
+    // translate, so the view offset is the second-to-last translate call.
+    const viewOffset = () => {
+      const calls = globalThis.__canvasTestUtil
+        .getCtxCalls()
+        .filter(([method]) => method === "translate");
+      return calls[calls.length - 2][1];
+    };
+    const before = viewOffset();
+
+    // A drag pans and produces no click, so no point is added.
+    touchStart(512, 384);
+    touchMove(600, 450);
+    touchMove(700, 500);
+    touchEnd(700, 500);
+    await sleep(60);
+
+    assert.equal(screen.queryByText(/Add Reference Point/), null);
+
+    // The view followed the finger by the full drag delta.
+    const after = viewOffset();
+    assert.equal(after[0] - before[0], 700 - 512);
+    assert.equal(after[1] - before[1], 500 - 384);
+  });
+
+  it("ignores the trailing click after a mouse drag", async () => {
+    await mountViewer();
+    const canvas = document.querySelector("canvas");
+
+    fireEvent.mouseDown(canvas, { clientX: 512, clientY: 384 });
+    fireEvent.mouseMove(canvas, { clientX: 600, clientY: 450 });
+    fireEvent.mouseUp(canvas, { clientX: 600, clientY: 450 });
+    // Browsers still emit a click after a mouse drag.
+    fireEvent.click(canvas, { clientX: 600, clientY: 450 });
+    await sleep(30);
+
+    assert.equal(screen.queryByText(/Add Reference Point/), null);
+  });
+});
+
 describe("MapViewer GPS flows", () => {
   it("selects coordinates on the OSM map using the maplibre mock", async () => {
     maplibreState.maps.length = 0;
