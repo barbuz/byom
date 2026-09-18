@@ -99,6 +99,26 @@
     };
   });
 
+  $effect(() => {
+    const el = canvas;
+    if (!el) return;
+
+    // Svelte 5 delegates touchstart/touchmove as passive listeners, which makes
+    // the handlers' e.preventDefault() a no-op; the browser then synthesizes a
+    // click, so a short mobile tap adds a reference point instead of only
+    // long-pressing. Bind them directly and non-passive.
+    const options = { passive: false };
+    el.addEventListener('touchstart', handleTouchStart, options);
+    el.addEventListener('touchmove', handleTouchMove, options);
+    el.addEventListener('touchend', handleTouchEnd);
+
+    return () => {
+      el.removeEventListener('touchstart', handleTouchStart, options);
+      el.removeEventListener('touchmove', handleTouchMove, options);
+      el.removeEventListener('touchend', handleTouchEnd);
+    };
+  });
+
 
 
   async function loadMapData() {
@@ -829,9 +849,6 @@
   
   <canvas
     bind:this={canvas}
-    ontouchstart={handleTouchStart}
-    ontouchmove={handleTouchMove}
-    ontouchend={handleTouchEnd}
     onwheel={handleWheel}
     onclick={handleCanvasClick}
     onmousemove={handleCanvasMouseMove}

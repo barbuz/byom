@@ -159,6 +159,44 @@ describe("MapViewer image loading", () => {
   });
 });
 
+describe("MapViewer touch handling", () => {
+  it("binds touch events non-passively so preventDefault still works", async () => {
+    const registrations = [];
+    const original = HTMLCanvasElement.prototype.addEventListener;
+    const spy = vi
+      .spyOn(HTMLCanvasElement.prototype, "addEventListener")
+      .mockImplementation(function (type, handler, options) {
+        registrations.push([type, options]);
+        return original.call(this, type, handler, options);
+      });
+
+    await mountViewer();
+    await flushPromises();
+
+    const optionsFor = (type) => registrations.filter(([t]) => t === type).map(([, o]) => o);
+
+    // Svelte 5 delegates touchstart/touchmove as passive, which silently
+    // disables preventDefault and lets the browser synthesize a click, so a
+    // short mobile tap would add a reference point instead of long-pressing.
+    assert.deepEqual(optionsFor("touchstart"), [{ passive: false }]);
+    assert.deepEqual(optionsFor("touchmove"), [{ passive: false }]);
+    assert.equal(optionsFor("touchend").length, 1);
+
+    const canvas = document.querySelector("canvas");
+    const touchStart = new Event("touchstart", { bubbles: true, cancelable: true });
+    Object.defineProperty(touchStart, "touches", { value: [{ clientX: 400, clientY: 300 }] });
+    canvas.dispatchEvent(touchStart);
+    assert.equal(touchStart.defaultPrevented, true);
+
+    const touchMove = new Event("touchmove", { bubbles: true, cancelable: true });
+    Object.defineProperty(touchMove, "touches", { value: [{ clientX: 410, clientY: 306 }] });
+    canvas.dispatchEvent(touchMove);
+    assert.equal(touchMove.defaultPrevented, true);
+
+    spy.mockRestore();
+  });
+});
+
 describe("MapViewer GPS flows", () => {
   it("selects coordinates on the OSM map using the maplibre mock", async () => {
     maplibreState.maps.length = 0;
