@@ -159,41 +159,75 @@ describe("MapViewer image loading", () => {
   });
 });
 
-describe("MapViewer touch handling", () => {
-  it("binds touch events non-passively so preventDefault still works", async () => {
-    const registrations = [];
-    const original = HTMLCanvasElement.prototype.addEventListener;
-    const spy = vi
-      .spyOn(HTMLCanvasElement.prototype, "addEventListener")
-      .mockImplementation(function (type, handler, options) {
-        registrations.push([type, options]);
-        return original.call(this, type, handler, options);
-      });
+describe("MapViewer pointer input", () => {
+  function canvas() {
+    return document.querySelector("canvas");
+  }
 
+  function touchStart(x, y) {
+    fireEvent.touchStart(canvas(), { touches: [{ clientX: x, clientY: y }] });
+  }
+
+  function touchMove(x, y) {
+    fireEvent.touchMove(canvas(), { touches: [{ clientX: x, clientY: y }] });
+  }
+
+  function touchEnd(x, y) {
+    fireEvent.touchEnd(canvas(), { changedTouches: [{ clientX: x, clientY: y }] });
+  }
+
+  it("starts a new point when the map is tapped", async () => {
     await mountViewer();
-    await flushPromises();
 
-    const optionsFor = (type) => registrations.filter(([t]) => t === type).map(([, o]) => o);
+    // Browsers emit a compatibility click after a tap on a touch device.
+    touchStart(512, 384);
+    touchEnd(512, 384);
+    clickCanvasAt(512, 384);
 
-    // Svelte 5 delegates touchstart/touchmove as passive, which silently
-    // disables preventDefault and lets the browser synthesize a click, so a
-    // short mobile tap would add a reference point instead of long-pressing.
-    assert.deepEqual(optionsFor("touchstart"), [{ passive: false }]);
-    assert.deepEqual(optionsFor("touchmove"), [{ passive: false }]);
-    assert.equal(optionsFor("touchend").length, 1);
+    await screen.findByText(/Add Reference Point/);
+  });
 
+  it("pans on drag without starting a new point", async () => {
+    await mountViewer();
+    await sleep(50);
+
+    // Each render emits the view translate first, then the image-centering
+    // translate, so the view offset is the second-to-last translate call.
+    const viewOffset = () => {
+      const calls = globalThis.__canvasTestUtil
+        .getCtxCalls()
+        .filter(([method]) => method === "translate");
+      return calls[calls.length - 2][1];
+    };
+    const before = viewOffset();
+
+    // A drag pans and produces no click, so no point is added.
+    touchStart(512, 384);
+    touchMove(600, 450);
+    touchMove(700, 500);
+    touchEnd(700, 500);
+    await sleep(60);
+
+    assert.equal(screen.queryByText(/Add Reference Point/), null);
+
+    // The view followed the finger by the full drag delta.
+    const after = viewOffset();
+    assert.equal(after[0] - before[0], 700 - 512);
+    assert.equal(after[1] - before[1], 500 - 384);
+  });
+
+  it("ignores the trailing click after a mouse drag", async () => {
+    await mountViewer();
     const canvas = document.querySelector("canvas");
-    const touchStart = new Event("touchstart", { bubbles: true, cancelable: true });
-    Object.defineProperty(touchStart, "touches", { value: [{ clientX: 400, clientY: 300 }] });
-    canvas.dispatchEvent(touchStart);
-    assert.equal(touchStart.defaultPrevented, true);
 
-    const touchMove = new Event("touchmove", { bubbles: true, cancelable: true });
-    Object.defineProperty(touchMove, "touches", { value: [{ clientX: 410, clientY: 306 }] });
-    canvas.dispatchEvent(touchMove);
-    assert.equal(touchMove.defaultPrevented, true);
+    fireEvent.mouseDown(canvas, { clientX: 512, clientY: 384 });
+    fireEvent.mouseMove(canvas, { clientX: 600, clientY: 450 });
+    fireEvent.mouseUp(canvas, { clientX: 600, clientY: 450 });
+    // Browsers still emit a click after a mouse drag.
+    fireEvent.click(canvas, { clientX: 600, clientY: 450 });
+    await sleep(30);
 
-    spy.mockRestore();
+    assert.equal(screen.queryByText(/Add Reference Point/), null);
   });
 });
 
