@@ -14,7 +14,8 @@
   let canvas = $state(null);
   let ctx = $state(null);
   let imageElement = $state(null);
-  
+  let imageReady = false;
+
   // Transform state
   let transform = $state({
     scale: 1,
@@ -78,8 +79,12 @@
 
     $effect(() => {
     untrack(() => {
-      loadMapData();
-      setupCanvas();
+      // setupCanvas reads imageUrl, which loadMapData resolves asynchronously;
+      // awaiting here keeps the image source from being set to null.
+      (async () => {
+        await loadMapData();
+        setupCanvas();
+      })();
     });
     window.addEventListener('resize', handleResize);
 
@@ -120,18 +125,24 @@
   }
 
   function setupCanvas() {
-    if (!canvas) return;
-    
+    if (!canvas || !imageUrl) return;
+
     ctx = canvas.getContext('2d');
     handleResize();
 
     // Load image
+    imageReady = false;
     imageElement = new Image();
     imageElement.onload = () => {
       imageWidth = imageElement.width;
       imageHeight = imageElement.height;
+      imageReady = true;
       fitImageToCanvas();
       scheduleRender();
+    };
+    imageElement.onerror = () => {
+      imageReady = false;
+      console.error('Failed to load map image:', imageUrl);
     };
     imageElement.src = imageUrl;
   }
@@ -165,7 +176,9 @@
 
   function render() {
     needsRender = false;
-    if (!ctx || !imageElement) return;
+    // drawImage throws InvalidStateError on a broken or not-yet-loaded image,
+    // so skip until the source has decoded.
+    if (!ctx || !imageElement || !imageReady) return;
 
     ctx.clearRect(0, 0, canvasWidth, canvasHeight);
     ctx.save();

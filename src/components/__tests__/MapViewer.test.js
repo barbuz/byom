@@ -109,6 +109,56 @@ beforeEach(() => {
   vi.stubGlobal("Image", MapImage);
 });
 
+describe("MapViewer image loading", () => {
+  it("sets the image source to the map blob URL, not null", async () => {
+    const instances = [];
+    class TrackingImage extends FakeImage {
+      constructor() {
+        super();
+        this.width = 800;
+        this.height = 600;
+        instances.push(this);
+      }
+    }
+    vi.stubGlobal("Image", TrackingImage);
+
+    await mountViewer();
+    await flushPromises();
+
+    assert.equal(instances.length, 1);
+    assert.match(String(instances[0].src), /^blob:/);
+  });
+
+  it("does not draw a broken image and reports the failure", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    class BrokenImage extends FakeImage {
+      set src(value) {
+        this.srcValue = value;
+        queueMicrotask(() => {
+          this.complete = true;
+          if (this.onerror) this.onerror();
+        });
+      }
+      get src() { return this.srcValue; }
+    }
+    vi.stubGlobal("Image", BrokenImage);
+
+    const result = render(MapViewer, { props: { mapId: "1" } });
+    await flushPromises();
+
+    // Interacting schedules a render, which must not reach drawImage on the
+    // broken image.
+    clickCanvasAt(512, 384);
+    await sleep(50);
+    const ctxCalls = globalThis.__canvasTestUtil.getCtxCalls();
+    assert.equal(ctxCalls.filter(([m]) => m === "drawImage").length, 0);
+    assert.ok(errorSpy.mock.calls.some(([msg]) => /Failed to load map image/.test(msg)));
+
+    result.unmount();
+    errorSpy.mockRestore();
+  });
+});
+
 describe("MapViewer GPS flows", () => {
   it("selects coordinates on the OSM map using the maplibre mock", async () => {
     maplibreState.maps.length = 0;
