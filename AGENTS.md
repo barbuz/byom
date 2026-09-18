@@ -101,6 +101,7 @@ which lives in IndexedDB and survives all updates.
 ## Gotchas
 
 - Svelte 5 components are functions, not classes. Mount with `mount(App, { target })` from `svelte`, never `new App({ target })`. The constructor form throws `effect_orphan` during bootstrap and renders a blank page. `src/main.test.js` guards this; component tests use `@testing-library/svelte`'s `mount()`, so they will not catch a broken call in `main.js`.
+- `$effect` replaces `onMount` async blocks, but only if you keep the `await`. `MapViewer`'s effect loads map data and then sets up the canvas, and `setupCanvas()` reads `imageUrl`, which `loadMapData()` resolves asynchronously; dropping the `await` sets `image.src = null`, which browsers treat as a broken image, so `drawImage` throws `InvalidStateError` and the viewer stays black. The effect now awaits, `setupCanvas` bails without an `imageUrl`, and `render()` skips until `imageReady`. `FakeImage` fires `onload` regardless of `src` and hardcodes dimensions, so component tests only catch this via assertions on the recorded `src`/`drawImage` calls.
 - Shallow/grafted clone: `git rev-parse --is-shallow-repository` => `true`; deepen if you need history.
 - PWA/service worker caching may serve stale builds; hard-reload or unregister the SW after switching branches.
 - No backend: the only network service is MapLibre OSM tiles (needs internet when picking coordinates).
