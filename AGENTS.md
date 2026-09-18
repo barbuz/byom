@@ -100,6 +100,7 @@ which lives in IndexedDB and survives all updates.
 
 ## Gotchas
 
+- Svelte 5 components are functions, not classes. Mount with `mount(App, { target })` from `svelte`, never `new App({ target })`. The constructor form throws `effect_orphan` during bootstrap and renders a blank page. `src/main.test.js` guards this; component tests use `@testing-library/svelte`'s `mount()`, so they will not catch a broken call in `main.js`.
 - Shallow/grafted clone: `git rev-parse --is-shallow-repository` => `true`; deepen if you need history.
 - PWA/service worker caching may serve stale builds; hard-reload or unregister the SW after switching branches.
 - No backend: the only network service is MapLibre OSM tiles (needs internet when picking coordinates).
