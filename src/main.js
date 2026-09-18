@@ -1,8 +1,9 @@
 /* v8 ignore start -- app bootstrap and PWA registration are browser-only */
+import { mount } from 'svelte';
 import './styles/App.css';
 import App from './App.svelte';
 
-const app = new App({
+const app = mount(App, {
   target: document.getElementById('app'),
 });
 
