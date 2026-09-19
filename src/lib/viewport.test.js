@@ -4,6 +4,7 @@ import {
   imageToScreen,
   getPointAtScreen,
   pinchZoomTransform,
+  centerOnImagePoint,
 } from './viewport.js';
 
 describe('screenToImage', () => {
@@ -115,5 +116,28 @@ describe('pinchZoomTransform', () => {
 
     expect(screen.x).toBeCloseTo(center.x,  5);
     expect(screen.y).toBeCloseTo(center.y,  5);
+  });
+});
+
+describe('centerOnImagePoint', () => {
+  it('puts the image point at the requested screen center without changing zoom or rotation', () => {
+    const transform = { scale:  2, rotation:  0.4, translateX:  10, translateY:  20 };
+    const centered = centerOnImagePoint(400, 300, transform,  800,  600, { x:  500, y:  400 });
+
+    expect(centered.scale).toBe(transform.scale);
+    expect(centered.rotation).toBe(transform.rotation);
+
+    const screen = imageToScreen(400, 300, centered,  800,  600);
+    expect(screen.x).toBeCloseTo(500,  5);
+    expect(screen.y).toBeCloseTo(400,  5);
+  });
+
+  it('centers any image point, including off-center ones', () => {
+    const transform = { scale:  1.5, rotation:  Math.PI / 3, translateX:  -5, translateY:  7 };
+    const centered = centerOnImagePoint(120, 540, transform,  800,  600, { x:  100, y:  100 });
+
+    const screen = imageToScreen(120, 540, centered,  800,  600);
+    expect(screen.x).toBeCloseTo(100,  5);
+    expect(screen.y).toBeCloseTo(100,  5);
   });
 });

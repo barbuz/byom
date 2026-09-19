@@ -44,6 +44,16 @@ canvas {
   transform: scale(0.95);
 }
 
+.control-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.center-user-btn {
+  background: #AF4C50;
+  color: white;
+}
+
 .back-btn {
   background: rgba(0, 0, 0, 0.7);
   color: white;

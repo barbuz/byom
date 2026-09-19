@@ -199,7 +199,7 @@ npm run test:coverage    # vitest run --coverage, enforces coverage thresholds
 | `src/lib/draw.js` | 100% |
 | `src/lib/db.js` | 100% |
 | `src/components/UserPositionMarker.svelte` | 100% |
-| `src/MapViewer.svelte` | 74% |
+| `src/MapViewer.svelte` | 87% |
 | `src/MapList.svelte` | 62% |
 
 `reportOnFailure` is enabled, so a threshold failure still produces a report to help diagnose regressions. A run that misses a threshold exits non-zero and breaks CI.

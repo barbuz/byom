@@ -2,7 +2,7 @@
   import { untrack } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
   import { calculateTransform, geoToImage, geoDistanceToImagePixels } from './lib/transforms.js';
-  import { screenToImage, getPointAtScreen, pinchZoomTransform } from './lib/viewport.js';
+  import { screenToImage, getPointAtScreen, pinchZoomTransform, centerOnImagePoint } from './lib/viewport.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
 
@@ -494,6 +494,29 @@
     window.location.hash = '';
   }
 
+  function centerOnUser() {
+    const position = userPositionMarker?.userPosition;
+    if (!position || !geoTransform) return;
+
+    let imageCoords;
+    try {
+      imageCoords = geoToImage(position.longitude, position.latitude, geoTransform);
+    } catch (error) {
+      console.error('Error centering on user position:', error);
+      return;
+    }
+
+    transform = centerOnImagePoint(
+      imageCoords.imageX,
+      imageCoords.imageY,
+      transform,
+      imageWidth,
+      imageHeight,
+      { x: canvasWidth / 2, y: canvasHeight / 2 },
+    );
+    scheduleRender();
+  }
+
   function togglePoints() {
     showingPoints = !showingPoints;
     if (!showingPoints) {
@@ -776,6 +799,7 @@
 
   let canSavePoint = $derived(pendingReferencePoint && selectedLon !== null && selectedLat !== null);
   let needsMorePoints = $derived(referencePoints.length < 3);
+  let canCenterOnUser = $derived(Boolean(userPositionMarker?.userPosition && geoTransform));
 </script>
 
 <div class="viewer-container">
@@ -811,6 +835,15 @@
       onclick={togglePoints}
     >
       {showingPoints ? '👁️' : '📝'} Points ({referencePoints.length})
+    </button>
+
+    <button
+      class="control-btn center-user-btn"
+      onclick={centerOnUser}
+      disabled={!canCenterOnUser}
+      title="Center the map on your current location"
+    >
+      🎯 Center on me
     </button>
 
     <button 

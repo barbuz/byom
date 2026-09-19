@@ -480,6 +480,67 @@ describe("MapViewer GPS flows", () => {
   });
 });
 
+describe("MapViewer center on user", () => {
+  function centerButton() {
+    return screen.getByRole("button", { name: /Center on me/ });
+  }
+
+  function viewOffset() {
+    const calls = globalThis.__canvasTestUtil
+      .getCtxCalls()
+      .filter(([method]) => method === "translate");
+    return calls[calls.length - 2][1];
+  }
+
+  it("disables the button until a GPS position and a geo transform are available", async () => {
+    await mountViewer();
+    assert.equal(centerButton().disabled, true);
+
+    const id = firstWatchId();
+    globalThis.__geolocationTestUtil.emitWatchPosition(id, {
+      latitude:  40.5,
+      longitude: -73.5,
+      accuracy:  10,
+    });
+    await flushPromises();
+    // Reference points are empty, so GPS cannot be mapped onto the image.
+    assert.equal(centerButton().disabled, true);
+  });
+
+  it("centers the view on the user's computed image location", async () => {
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+    await sleep(50);
+
+    const id = firstWatchId();
+    globalThis.__geolocationTestUtil.emitWatchPosition(id, {
+      latitude:  40.5,
+      longitude: -73.5,
+      accuracy:  10,
+    });
+    await flushPromises();
+
+    const button = centerButton();
+    assert.equal(button.disabled, false);
+    fireEvent.click(button);
+    await sleep(30);
+
+    const { geoToImage, calculateTransform } = await import("../../lib/transforms.js");
+    const geoTransform = calculateTransform(REF_POINTS);
+    const image = geoToImage(-73.5, 40.5, geoTransform);
+
+    const canvasWidth = window.innerWidth;
+    const canvasHeight = window.innerHeight;
+    const scale = Math.min(canvasWidth / 800, canvasHeight / 600) * 0.9;
+    const expectedX = canvasWidth / 2 - (image.imageX - 400) * scale;
+    const expectedY = canvasHeight / 2 - (image.imageY - 300) * scale;
+
+    const offset = viewOffset();
+    assert.ok(Math.abs(offset[0] - expectedX) < 1e-6, `x ${offset[0]} vs ${expectedX}`);
+    assert.ok(Math.abs(offset[1] - expectedY) < 1e-6, `y ${offset[1]} vs ${expectedY}`);
+  });
+});
+
 describe("MapViewer point editing", () => {
   // The component sizes the canvas to the viewport and fits the 800x600
   // image into it, so the first reference point is not at its raw pixel
