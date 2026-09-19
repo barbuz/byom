@@ -79,17 +79,24 @@ export function getPointAtScreen(
 }
 
 /**
- * Compute the transform resulting from zooming to `newScale` while keeping
- * the pinch center (a screen-space point.) fixed. Used by the two-finger
- * gesture handler; rotation stays untouched.
+ * Compute the transform for a two-finger gesture that zooms to `newScale`
+ * and pans so the image point that started under `startCenter` ends up under
+ * `center`. Both screen points are measured against `startTransform`, the
+ * transform captured when the gesture began.
+ *
+ * `startCenter` (the pinch center at gesture start) must stay fixed for the
+ * gesture's duration. Deriving the anchored offset from the moving `center`
+ * instead would fold the pan delta into the zoom and drive the map the wrong
+ * way. Note the anchor's screen offset scales uniformly with the zoom, so the
+ * (unused) rotation term cancels and rotation stays untouched.
  */
-export function pinchZoomTransform(center, startTransform, newScale, startScale = startTransform.scale) {
-  const scaleChange = newScale / startScale;
-  const offsetX = center.x - startTransform.translateX;
-  const offsetY = center.y - startTransform.translateY;
+export function pinchZoomTransform(center, startTransform, newScale, startCenter = center) {
+  const scaleChange = newScale / startTransform.scale;
+  const offsetX = startCenter.x - startTransform.translateX;
+  const offsetY = startCenter.y - startTransform.translateY;
 
   return {
-    scale:newScale,
+    scale: newScale,
     translateX: center.x - offsetX * scaleChange,
     translateY: center.y - offsetY * scaleChange,
   };
