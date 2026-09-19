@@ -485,6 +485,23 @@ describe("MapViewer center on user", () => {
     return screen.getByRole("button", { name: /Center on me/ });
   }
 
+  it("renders as an icon-only control outside the centred button bar", async () => {
+    await mountViewer();
+
+    const button = centerButton();
+    // Icon-only: the emoji is hidden from assistive tech and the accessible
+    // name comes from aria-label, so there is no visible text label.
+    assert.equal(button.textContent.trim(), "🎯");
+    assert.ok(button.querySelector('[aria-hidden="true"]'));
+    assert.equal(button.getAttribute("aria-label"), "Center on me");
+    assert.equal(button.classList.contains("center-user-btn"), true);
+    assert.equal(button.classList.contains("control-btn"), false);
+
+    // Pinned bottom-right, not inside the flex control bar.
+    const controls = document.querySelector(".controls");
+    assert.equal(controls.contains(button), false);
+  });
+
   function viewOffset() {
     const calls = globalThis.__canvasTestUtil
       .getCtxCalls()

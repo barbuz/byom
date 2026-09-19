@@ -890,15 +890,6 @@
       {showingPoints ? '👁️' : '📝'} Points ({referencePoints.length})
     </button>
 
-    <button
-      class="control-btn center-user-btn"
-      onclick={centerOnUser}
-      disabled={!canCenterOnUser}
-      title="Center the map on your current location"
-    >
-      🎯 Center on me
-    </button>
-
     <button 
       class="control-btn debug-btn {showingDebug ? 'active' : ''}" 
       onclick={toggleDebug}
@@ -906,6 +897,16 @@
       🐛 Debug
     </button>
   </div>
+
+  <button
+    class="center-user-btn"
+    onclick={centerOnUser}
+    disabled={!canCenterOnUser}
+    aria-label="Center on me"
+    title="Center the map on your current location"
+  >
+    <span aria-hidden="true">🎯</span>
+  </button>
 
   {#if showingPoints && referencePoints.length > 0}
     <div class="points-info">

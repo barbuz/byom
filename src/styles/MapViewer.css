@@ -49,9 +49,36 @@ canvas {
   cursor: not-allowed;
 }
 
+/* Icon-only locate control, pinned bottom-right like Google Maps. Sits above
+   the centred control bar rather than inside it, so it stays clear of the
+   Points/Debug buttons on narrow screens. */
 .center-user-btn {
-  background: #AF4C50;
-  color: white;
+  position: absolute;
+  right: 1.25rem;
+  bottom: 2rem;
+  width: 3rem;
+  height: 3rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.95);
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+  transition: all 0.2s;
+}
+
+.center-user-btn:active {
+  transform: scale(0.95);
+}
+
+.center-user-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
 }
 
 .back-btn {
