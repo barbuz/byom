@@ -78,4 +78,42 @@ describe('pinchZoomTransform', () => {
     expect(zoomed.translateX).toBeCloseTo(-100,  5);
     expect(zoomed.translateY).toBeCloseTo(-100,  5);
   });
+
+  it('pans with the fingers while zooming instead of against them', () => {
+    // Anchor the gesture on the view's own origin (translate == start center),
+    // so zooming alone would not move the image and any change comes purely
+    // from the finger pan.
+    const startCenter = { x:  100, y:  100 };
+    const transform = { scale:  1, rotation:  0, translateX:  100, translateY:  100 };
+    // Fingers spread to double the distance and move together by (+50, +20).
+    const center = { x:  150, y:  120 };
+    const zoomed = pinchZoomTransform(center, transform,  2, startCenter);
+    // The view must follow the fingers by the pan delta. The old formula,
+    // anchoring on the moving center, produced (-50, -20) here: opposite.
+    expect(zoomed.scale).toBe(2);
+    expect(zoomed.translateX).toBeCloseTo(150,  5);
+    expect(zoomed.translateY).toBeCloseTo(120,  5);
+  });
+
+  it('keeps the point under the starting center pinned when the center moves', () => {
+    // The image point under startCenter must land under center after the
+    // transform, for an arbitrary pan + zoom.
+    const startTransform = { scale:  1.5, rotation:  0, translateX:  -20, translateY:  40 };
+    const startCenter = { x:  200, y:  150 };
+    const center = { x:  260, y:  110 };
+    const newScale = 3;
+    const imagePoint = {
+      x: (startCenter.x - startTransform.translateX) / startTransform.scale,
+      y: (startCenter.y - startTransform.translateY) / startTransform.scale,
+    };
+
+    const zoomed = pinchZoomTransform(center, startTransform, newScale, startCenter);
+    const screen = {
+      x: imagePoint.x * zoomed.scale + zoomed.translateX,
+      y: imagePoint.y * zoomed.scale + zoomed.translateY,
+    };
+
+    expect(screen.x).toBeCloseTo(center.x,  5);
+    expect(screen.y).toBeCloseTo(center.y,  5);
+  });
 });

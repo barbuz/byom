@@ -37,6 +37,7 @@
   let lastTouchDistance = $state(0);
   let lastTouchAngle = $state(0);
   let lastTouchCenter = $state({ x: 0, y: 0 });
+  let touchStartCenter = $state({ x: 0, y: 0 });
   let touchStartTransform = $state(null);
 
   // Mouse interaction state
@@ -323,7 +324,8 @@
         x: (touch1.clientX + touch2.clientX) / 2,
         y: (touch1.clientY + touch2.clientY) / 2,
       };
-      
+      touchStartCenter = { ...lastTouchCenter };
+
       touchStartTransform = { ...transform };
     }
   }
@@ -361,8 +363,9 @@
       const newScale = touchStartTransform.scale * scaleFactor;
       const clampedScale = Math.max(0.1, Math.min(10, newScale));
 
-      // Zoom around the current pinch center keeping it fixed
-      const zoomed = pinchZoomTransform(center, touchStartTransform, clampedScale);
+      // Zoom to the gesture scale and pan so the image point that was under
+      // the starting pinch center follows the (moving) current center.
+      const zoomed = pinchZoomTransform(center, touchStartTransform, clampedScale, touchStartCenter);
       transform.translateX = zoomed.translateX;
       transform.translateY = zoomed.translateY;
       transform.scale = zoomed.scale;

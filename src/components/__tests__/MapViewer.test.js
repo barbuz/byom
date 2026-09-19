@@ -229,6 +229,49 @@ describe("MapViewer pointer input", () => {
 
     assert.equal(screen.queryByText(/Add Reference Point/), null);
   });
+
+  function twoFingerTouches(x1, y1, x2, y2) {
+    return [
+      { clientX: x1, clientY: y1 },
+      { clientX: x2, clientY: y2 },
+    ];
+  }
+
+  it("pans with the two-finger center while pinching", async () => {
+    await mountViewer();
+    await sleep(50);
+
+    const viewOffset = () => {
+      const calls = globalThis.__canvasTestUtil
+        .getCtxCalls()
+        .filter(([method]) => method === "translate");
+      return calls[calls.length - 2][1];
+    };
+    const before = viewOffset();
+
+    // After fitImageToCanvas the canvas (1024x768) centers the 800x600 image
+    // at (512, 384); the gesture starts there with the view translate sitting
+    // exactly on the pinch center. Fingers start symmetric about that point
+    // 100px apart, then spread to 200px apart while moving down-right by
+    // (+50, +30).
+    fireEvent.touchStart(
+      canvas(),
+      { touches: twoFingerTouches(462, 384, 562, 384) },
+    );
+    fireEvent.touchMove(
+      canvas(),
+      { touches: twoFingerTouches(462, 414, 662, 414) },
+    );
+    await sleep(60);
+
+    const after = viewOffset();
+    // The view follows the fingers' center: zooming alone would keep the map
+    // put, so the delta is the pan. The pre-fix code moved it to (-50, -30).
+    assert.ok(after[0] - before[0] > 0, `x moved ${after[0] - before[0]}`);
+    assert.ok(after[1] - before[1] > 0, `y moved ${after[1] - before[1]}`);
+    assert.equal(after[0] - before[0], 50);
+    assert.equal(after[1] - before[1], 30);
+  });
 });
 
 describe("MapViewer GPS flows", () => {
