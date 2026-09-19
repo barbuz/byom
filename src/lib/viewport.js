@@ -55,6 +55,23 @@ export function imageToScreen(imageX, imageY, transform, imageWidth, imageHeight
 }
 
 /**
+ * Return a transform that pans (without zooming or rotating) so the image
+ * point (imageX,imageY) sits at the screen point `center`.
+ */
+export function centerOnImagePoint(imageX, imageY, transform, imageWidth, imageHeight, center) {
+  const offsetX = imageX - imageWidth / 2;
+  const offsetY = imageY - imageHeight / 2;
+  const cos_r = cos(transform.rotation);
+  const sin_r = sin(transform.rotation);
+
+  return {
+    ...transform,
+    translateX: center.x - (cos_r * offsetX - sin_r * offsetY) * transform.scale,
+    translateY: center.y - (sin_r * offsetX + cos_r * offsetY) * transform.scale,
+  };
+}
+
+/**
  * Return the index of the reference point whose screen position is within
  * `clickRadius` of (screenX,screenY.), or -1 if none.
  */

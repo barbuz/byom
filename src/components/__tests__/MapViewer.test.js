@@ -480,6 +480,174 @@ describe("MapViewer GPS flows", () => {
   });
 });
 
+describe("MapViewer center on user", () => {
+  function centerButton() {
+    return screen.getByRole("button", { name: /Center on me/ });
+  }
+
+  it("renders as an icon-only crosshair control outside the centred button bar", async () => {
+    await mountViewer();
+
+    const button = centerButton();
+    // Icon-only: the SVG is hidden from assistive tech and the accessible
+    // name comes from aria-label, so there is no visible text at all.
+    assert.equal(button.textContent.trim(), "");
+    assert.equal(button.getAttribute("aria-label"), "Center on me");
+    assert.equal(button.classList.contains("center-user-btn"), true);
+    assert.equal(button.classList.contains("control-btn"), false);
+
+    // A crosshair, not a target/emoji: circle plus four arms.
+    const svg = button.querySelector("svg.center-user-icon");
+    assert.ok(svg, "crosshair svg should be present");
+    assert.equal(svg.getAttribute("aria-hidden"), "true");
+    assert.equal(svg.getAttribute("stroke"), "currentColor");
+    assert.equal(svg.querySelector("circle").getAttribute("r"), "7");
+    assert.equal(svg.querySelectorAll("line").length, 4);
+
+    // Pinned bottom-right, not inside the flex control bar.
+    const controls = document.querySelector(".controls");
+    assert.equal(controls.contains(button), false);
+  });
+
+  function viewOffset() {
+    const calls = globalThis.__canvasTestUtil
+      .getCtxCalls()
+      .filter(([method]) => method === "translate");
+    return calls[calls.length - 2][1];
+  }
+
+  it("disables the button until a GPS position and a geo transform are available", async () => {
+    await mountViewer();
+    assert.equal(centerButton().disabled, true);
+
+    const id = firstWatchId();
+    globalThis.__geolocationTestUtil.emitWatchPosition(id, {
+      latitude:  40.5,
+      longitude: -73.5,
+      accuracy:  10,
+    });
+    await flushPromises();
+    // Reference points are empty, so GPS cannot be mapped onto the image.
+    assert.equal(centerButton().disabled, true);
+  });
+
+  it("centers the view on the user's computed image location", async () => {
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+    await sleep(50);
+
+    const id = firstWatchId();
+    globalThis.__geolocationTestUtil.emitWatchPosition(id, {
+      latitude:  40.5,
+      longitude: -73.5,
+      accuracy:  10,
+    });
+    await flushPromises();
+
+    const button = centerButton();
+    assert.equal(button.disabled, false);
+    fireEvent.click(button);
+    await sleep(30);
+
+    const { geoToImage, calculateTransform } = await import("../../lib/transforms.js");
+    const geoTransform = calculateTransform(REF_POINTS);
+    const image = geoToImage(-73.5, 40.5, geoTransform);
+
+    const canvasWidth = window.innerWidth;
+    const canvasHeight = window.innerHeight;
+    const scale = Math.min(canvasWidth / 800, canvasHeight / 600) * 0.9;
+    const expectedX = canvasWidth / 2 - (image.imageX - 400) * scale;
+    const expectedY = canvasHeight / 2 - (image.imageY - 300) * scale;
+
+    const offset = viewOffset();
+    assert.ok(Math.abs(offset[0] - expectedX) < 1e-6, `x ${offset[0]} vs ${expectedX}`);
+    assert.ok(Math.abs(offset[1] - expectedY) < 1e-6, `y ${offset[1]} vs ${expectedY}`);
+  });
+});
+
+describe("MapViewer degenerate georeference", () => {
+  // Two points with identical GPS coordinates but different image coordinates
+  // have no valid similarity transform. That must not be treated as a map
+  // load failure, or the map is permanently unopenable and the offending
+  // points can never be fixed or deleted.
+  const DUPLICATE_GPS_POINTS = [
+    { id: 1, mapId: 1, imageX: 100, imageY: 100, lon: -74.0, lat: 40.0, accuracy: null },
+    { id: 2, mapId: 1, imageX: 700, imageY: 500, lon: -74.0, lat: 40.0, accuracy: null },
+  ];
+
+  it("still opens the map and shows the georeference error", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    getReferencePoints.mockResolvedValue(DUPLICATE_GPS_POINTS);
+
+    await mountViewer();
+    await sleep(30);
+
+    // The map itself loaded: no bail-out alert, no navigation away, canvas live.
+    assert.equal(window.alert.mock.calls.length, 0);
+    assert.ok(document.querySelector("canvas"));
+
+    await screen.findByText(/Georeference unavailable/);
+    await screen.findByText(/Reference points must be distinct/);
+
+    errorSpy.mockRestore();
+  });
+
+  it("lets the user recover by editing a point to a distinct location", async () => {
+    // Model the persistence round-trip: the edit lands in the "database", so
+    // the reload that follows the save sees the corrected point set.
+    const stored = DUPLICATE_GPS_POINTS.map((point) => ({ ...point }));
+    getReferencePoints.mockImplementation(async () => stored.map((point) => ({ ...point })));
+    updateReferencePoint.mockImplementation(async (id, changes) => {
+      const target = stored.find((point) => point.id === id);
+      Object.assign(target, changes);
+    });
+
+    await mountViewer();
+    await sleep(30);
+
+    // Reveal and open the first point for editing.
+    fireEvent.click(screen.getByText(/Points \(2\)/));
+    await flushPromises();
+
+    const canvasWidth = window.innerWidth;
+    const canvasHeight = window.innerHeight;
+    const scale = Math.min(canvasWidth / 800, canvasHeight / 600) * 0.9;
+    clickCanvasAt(
+      canvasWidth / 2 + (100 - 400) * scale,
+      canvasHeight / 2 + (100 - 300) * scale,
+    );
+    await screen.findByText(/Edit Point #1/);
+
+    // Give it its own GPS coordinate; the set becomes valid again.
+    await fireEvent.input(screen.getByLabelText("Latitude"), { target: { value: "41.0" } });
+    fireEvent.click(screen.getByText("Save"));
+    await flushPromises();
+
+    assert.equal(updateReferencePoint.mock.calls.length, 1);
+    assert.equal(window.alert.mock.calls.length, 0);
+  });
+
+  it("refuses to add a point that would make the georeference invalid", async () => {
+    getReferencePoints.mockResolvedValue([REF_POINTS[0]]);
+    await mountViewer();
+
+    // Second point at a different image location, but the same GPS coords.
+    clickCanvasAt(512, 384);
+    await sleep(120);
+    fireEvent.click(await screen.findByRole("button", { name: /Manual Entry/ }));
+    await fireEvent.input(screen.getByLabelText(/Latitude/), { target: { value: "40.0" } });
+    await fireEvent.input(screen.getByLabelText(/Longitude/), { target: { value: "-74.0" } });
+    fireEvent.click(screen.getByText("Use These Coordinates"));
+    await flushPromises();
+    fireEvent.click(screen.getByText("Save Point"));
+    await flushPromises();
+
+    assert.equal(addReferencePoint.mock.calls.length, 0);
+    assert.equal(window.alert.mock.calls.length, 1);
+    assert.match(window.alert.mock.calls[0][0], /Reference points must be distinct/);
+  });
+});
+
 describe("MapViewer point editing", () => {
   // The component sizes the canvas to the viewport and fits the 800x600
   // image into it, so the first reference point is not at its raw pixel
