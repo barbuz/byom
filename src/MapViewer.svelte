@@ -48,6 +48,7 @@
 
   // Transform state for GPS
   let geoTransform = $state(null);
+  let geoTransformError = $state(null);
   let userPositionMarker = $state(null);
 
 
@@ -295,7 +296,18 @@
   }
 
   function updateGeoTransform() {
-    geoTransform = calculateTransform(referencePoints);
+    try {
+      geoTransform = calculateTransform(referencePoints);
+      geoTransformError = null;
+    } catch (error) {
+      // A degenerate point set (e.g. two points sharing GPS coordinates but
+      // not image coordinates) has no valid georeference. That is a property
+      // of the stored points, not a load failure: keep the map usable so the
+      // offending points can be edited or deleted.
+      console.error('Error computing georeference:', error);
+      geoTransform = null;
+      geoTransformError = error.message;
+    }
   }
 
 
@@ -531,6 +543,21 @@
       lat >= -90 && lat <= 90 && lon >= -180 && lon <= 180;
   }
 
+  /**
+   * Return the fitter's error message for a candidate point set, or null when
+   * it georeferences cleanly. Reusing calculateTransform's own validation
+   * catches every degenerate case (duplicate GPS coordinates, collinear
+   * points, ...), not just the ones enumerated here.
+   */
+  function transformErrorFor(points) {
+    try {
+      calculateTransform(points);
+      return null;
+    } catch (error) {
+      return error.message;
+    }
+  }
+
   async function saveEditedPoint() {
     if (!editingPoint) return;
 
@@ -538,6 +565,20 @@
     // leave the map unloadable once the fitters reject the point.
     if (!isValidCoordinate(editingPoint.lat, editingPoint.lon)) {
       alert('Latitude must be between -90 and 90 and longitude between -180 and 180');
+      return;
+    }
+
+    // Guard the edited set too, so a correction cannot itself brick the map.
+    // This is also the recovery path: an edit that makes the points distinct
+    // validates cleanly and is allowed through.
+    const candidate = referencePoints.map((point) =>
+      point.id === editingPoint.id
+        ? { ...point, lon: editingPoint.lon, lat: editingPoint.lat }
+        : point,
+    );
+    const transformError = transformErrorFor(candidate);
+    if (transformError) {
+      alert(`Cannot save this point: ${transformError}`);
       return;
     }
 
@@ -777,6 +818,18 @@
   async function saveReferencePoint() {
     if (!pendingReferencePoint || selectedLon === null || selectedLat === null) return;
 
+    // Refuse a point that would leave the map without a valid georeference,
+    // rather than persisting a set that renders the map unusable.
+    const candidate = [
+      ...referencePoints,
+      { imageX: pendingReferencePoint.imageX, imageY: pendingReferencePoint.imageY, lon: selectedLon, lat: selectedLat },
+    ];
+    const transformError = transformErrorFor(candidate);
+    if (transformError) {
+      alert(`Cannot add this point: ${transformError}`);
+      return;
+    }
+
     try {
       const { addReferencePoint } = await import('./lib/db.js');
       await addReferencePoint({
@@ -862,21 +915,33 @@
       <div class="points-hint">
         📍 Add points: tap or click on the map
       </div>
-      <div class="transform-status">
-        {#if referencePoints.length === 2}
-          ✓ Similarity transform
-        {:else if referencePoints.length === 3}
-          ✓ Affine transform ({referencePoints.length} points)
-        {:else if referencePoints.length >= 4}
-          ✓ Homography transform ({referencePoints.length} points)
-        {/if}
-      </div>
+      {#if geoTransformError}
+        <div class="transform-status transform-error">
+          ⚠️ Georeference unavailable: {geoTransformError}
+        </div>
+      {:else}
+        <div class="transform-status">
+          {#if referencePoints.length === 2}
+            ✓ Similarity transform
+          {:else if referencePoints.length === 3}
+            ✓ Affine transform ({referencePoints.length} points)
+          {:else if referencePoints.length >= 4}
+            ✓ Homography transform ({referencePoints.length} points)
+          {/if}
+        </div>
+      {/if}
     </div>
   {:else if !showingPoints}
     <div class="points-info">
-      <div class="points-hint">
-        📍 Add reference points: tap or click on the map
-      </div>
+      {#if geoTransformError}
+        <div class="points-hint hint-error">
+          ⚠️ Georeference unavailable: {geoTransformError}
+        </div>
+      {:else}
+        <div class="points-hint">
+          📍 Add reference points: tap or click on the map
+        </div>
+      {/if}
     </div>
   {/if}
 

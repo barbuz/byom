@@ -105,6 +105,11 @@ canvas {
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
 }
 
+.transform-error,
+.hint-error {
+  background: rgba(211, 47, 47, 0.95);
+}
+
 .point-edit-info {
   background: #f5f5f5;
   padding: 1rem;
