@@ -905,7 +905,24 @@
     aria-label="Center on me"
     title="Center the map on your current location"
   >
-    <span aria-hidden="true">🎯</span>
+    <!-- Crosshair: circle plus four arms. Drawn inline so the control keeps a
+         crisp look independent of emoji font support. -->
+    <svg
+      class="center-user-icon"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      stroke-width="2"
+      stroke-linecap="round"
+      aria-hidden="true"
+      focusable="false"
+    >
+      <circle cx="12" cy="12" r="7" />
+      <line x1="12" y1="1" x2="12" y2="5" />
+      <line x1="12" y1="19" x2="12" y2="23" />
+      <line x1="1" y1="12" x2="5" y2="12" />
+      <line x1="19" y1="12" x2="23" y2="12" />
+    </svg>
   </button>
 
   {#if showingPoints && referencePoints.length > 0}

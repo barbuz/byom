@@ -65,11 +65,16 @@ canvas {
   border: none;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.95);
-  font-size: 1.35rem;
+  color: #333;
   line-height: 1;
   cursor: pointer;
   box-shadow: 0 2px 8px rgba(0,0,0,0.3);
   transition: all 0.2s;
+}
+
+.center-user-icon {
+  width: 1.5rem;
+  height: 1.5rem;
 }
 
 .center-user-btn:active {

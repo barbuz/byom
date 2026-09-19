@@ -485,17 +485,24 @@ describe("MapViewer center on user", () => {
     return screen.getByRole("button", { name: /Center on me/ });
   }
 
-  it("renders as an icon-only control outside the centred button bar", async () => {
+  it("renders as an icon-only crosshair control outside the centred button bar", async () => {
     await mountViewer();
 
     const button = centerButton();
-    // Icon-only: the emoji is hidden from assistive tech and the accessible
-    // name comes from aria-label, so there is no visible text label.
-    assert.equal(button.textContent.trim(), "🎯");
-    assert.ok(button.querySelector('[aria-hidden="true"]'));
+    // Icon-only: the SVG is hidden from assistive tech and the accessible
+    // name comes from aria-label, so there is no visible text at all.
+    assert.equal(button.textContent.trim(), "");
     assert.equal(button.getAttribute("aria-label"), "Center on me");
     assert.equal(button.classList.contains("center-user-btn"), true);
     assert.equal(button.classList.contains("control-btn"), false);
+
+    // A crosshair, not a target/emoji: circle plus four arms.
+    const svg = button.querySelector("svg.center-user-icon");
+    assert.ok(svg, "crosshair svg should be present");
+    assert.equal(svg.getAttribute("aria-hidden"), "true");
+    assert.equal(svg.getAttribute("stroke"), "currentColor");
+    assert.equal(svg.querySelector("circle").getAttribute("r"), "7");
+    assert.equal(svg.querySelectorAll("line").length, 4);
 
     // Pinned bottom-right, not inside the flex control bar.
     const controls = document.querySelector(".controls");
