@@ -5,7 +5,9 @@ import UserPositionMarker from "../UserPositionMarker.svelte";
 import assert from "node:assert/strict";
 
 const SIM = {
-  m: [100, 0, 0, 0, 100, 0, 0, 0, 1],
+  // 100 metres per pixel, and the test's image is 800x600 so the divisor is
+  // 800: 100 * 800 = 80000 metres per fraction unit.
+  m: [80000, 0, 0, 0, 80000, 0, 0, 0, 1],
   type: 'similarity',
   lon0: 10,
   lat0: 20,

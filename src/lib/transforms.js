@@ -1,11 +1,20 @@
 /**
  * Coordinate transformation utilities for BYOM.
  *
- * Similarity, affine and homography all map image pixels to local east/north
- * metres and share the same homogeneous 3x3 matrix representation, so callers
- * only ever hold one shape: the fitted matrix, its type label, and the metric
- * plane's origin. Ground distance per degree varies with latitude, so a fit is
- * only isotropic in that metric plane; every model is therefore fitted there.
+ * Similarity, affine and homography all map image coordinates to local
+ * east/north metres and share the same homogeneous 3x3 matrix representation,
+ * so callers only ever hold one shape: the fitted matrix, its type label, and
+ * the metric plane's origin. Ground distance per degree varies with latitude,
+ * so a fit is only isotropic in that metric plane; every model is therefore
+ * fitted there.
+ *
+ * Image coordinates are stored and fitted as fractions of a single divisor,
+ * `u = imageX / D` and `v = imageY / D` with `D = max(imageWidth, imageHeight)`.
+ * A single divisor makes the image-to-fraction change of coordinates a
+ * similarity of the plane, so a similarity fitted on (u, v) is still a
+ * similarity in metres; per-axis scaling would turn it into an ellipse unless
+ * the image is square. It also keeps both coordinates within [0, 1] for any
+ * aspect ratio, and separates metres-per-fraction from the image resolution.
  *
  * Matrix layout is row-major:
  *   [m0 m1 m2]
@@ -240,12 +249,12 @@ export function planeOrigin(points) {
  * Reject reference points whose image or geographic coordinates cannot be
  * projected. A null coordinate would otherwise coerce to a number and yield a
  * finite but wrong transform, and undefined would propagate NaN.
- * @param {Array} points
+ * @param {Array} points - [{u, v, lon, lat}, ...]
  */
 function assertFinitePoints(points) {
   for (const point of points) {
     if (
-      !Number.isFinite(point.imageX) || !Number.isFinite(point.imageY) ||
+      !Number.isFinite(point.u) || !Number.isFinite(point.v) ||
       !Number.isFinite(point.lon) || !Number.isFinite(point.lat)
     ) {
       throw new Error('Reference points must have finite coordinates');
@@ -256,7 +265,7 @@ function assertFinitePoints(points) {
 /**
  * Compute similarity transform (2 points): uniform scale, rotation and
  * translation, fitted in the local metric plane about the midpoint.
- * @param {Array} referencePoints - [{imageX, imageY, lon, lat}, ...]
+ * @param {Array} referencePoints - [{u, v, lon, lat}, ...]
  * @returns {Object} Transform {m, type, lon0, lat0}
  */
 export function computeSimilarityTransform(referencePoints) {
@@ -271,27 +280,28 @@ export function computeSimilarityTransform(referencePoints) {
   const m1 = lonLatToLocalMeters(p1.lon, p1.lat, lon0, lat0);
   const m2 = lonLatToLocalMeters(p2.lon, p2.lat, lon0, lat0);
 
-  const dxImage = p2.imageX - p1.imageX;
-  const dyImage = p2.imageY - p1.imageY;
+  const du = p2.u - p1.u;
+  const dv = p2.v - p1.v;
   const dxMetric = m2.east - m1.east;
   const dyMetric = m2.north - m1.north;
 
-  const distanceImage = Math.hypot(dxImage, dyImage);
+  const distanceImage = Math.hypot(du, dv);
   const distanceMetric = Math.hypot(dxMetric, dyMetric);
   if (!(distanceImage > 0) || !(distanceMetric > 0)) {
     throw new Error('Reference points must be distinct');
   }
 
-  // Metres per pixel, and the rotation aligning the image to the metric plane.
+  // Metres per fraction unit, and the rotation aligning the image to the
+  // metric plane.
   const scale = distanceMetric / distanceImage;
-  const rotation = Math.atan2(dyMetric, dxMetric) - Math.atan2(dyImage, dxImage);
+  const rotation = Math.atan2(dyMetric, dxMetric) - Math.atan2(dv, du);
   const cos = Math.cos(rotation);
   const sin = Math.sin(rotation);
 
   return {
     m: [
-      scale * cos, -scale * sin, m1.east - (scale * cos * p1.imageX - scale * sin * p1.imageY),
-      scale * sin, scale * cos, m1.north - (scale * sin * p1.imageX + scale * cos * p1.imageY),
+      scale * cos, -scale * sin, m1.east - (scale * cos * p1.u - scale * sin * p1.v),
+      scale * sin, scale * cos, m1.north - (scale * sin * p1.u + scale * cos * p1.v),
       0, 0, 1,
     ],
     type: 'similarity',
@@ -302,7 +312,7 @@ export function computeSimilarityTransform(referencePoints) {
 
 /**
  * Compute affine transform (3 points), fitted in the local metric plane.
- * @param {Array} referencePoints - [{imageX, imageY, lon, lat}, ...]
+ * @param {Array} referencePoints - [{u, v, lon, lat}, ...]
  * @returns {Object} Transform {m, type, lon0, lat0}
  */
 export function computeAffineTransform(referencePoints) {
@@ -318,9 +328,9 @@ export function computeAffineTransform(referencePoints) {
 
   for (const point of used) {
     const { east, north } = lonLatToLocalMeters(point.lon, point.lat, lon0, lat0);
-    rows.push([point.imageX, point.imageY, 1, 0, 0, 0]);
+    rows.push([point.u, point.v, 1, 0, 0, 0]);
     values.push(east);
-    rows.push([0, 0, 0, point.imageX, point.imageY, 1]);
+    rows.push([0, 0, 0, point.u, point.v, 1]);
     values.push(north);
   }
 
@@ -341,7 +351,7 @@ export function computeAffineTransform(referencePoints) {
  * Both planes are Hartley-normalized before the solve and the result is
  * denormalized afterwards, which keeps the DLT design matrix well conditioned
  * regardless of map size and resolution.
- * @param {Array} referencePoints - [{imageX, imageY, lon, lat}, ...]
+ * @param {Array} referencePoints - [{u, v, lon, lat}, ...]
  * @returns {Object} Transform {m, type, lon0, lat0}
  */
 export function computeHomographyTransform(referencePoints) {
@@ -353,7 +363,7 @@ export function computeHomographyTransform(referencePoints) {
   assertFinitePoints(used);
   const { lon0, lat0 } = planeOrigin(used);
 
-  const imagePoints = used.map(({ imageX, imageY }) => ({ x: imageX, y: imageY }));
+  const imagePoints = used.map(({ u, v }) => ({ x: u, y: v }));
   const metricPoints = used.map((point) =>
     lonLatToLocalMeters(point.lon, point.lat, lon0, lat0)
   );
@@ -393,14 +403,14 @@ export function computeHomographyTransform(referencePoints) {
 }
 
 /**
- * Transform image coordinates to geographic coordinates.
- * @param {number} imageX
- * @param {number} imageY
+ * Transform fractional image coordinates to geographic coordinates.
+ * @param {number} u - Fractional image x in [0, 1]
+ * @param {number} v - Fractional image y in [0, 1]
  * @param {Object} transform - Transform object {m, type, lon0, lat0}
  * @returns {Object} {lon, lat}
  */
-export function imageToGeo(imageX, imageY, transform) {
-  const local = applyMatrix(transform.m, imageX, imageY);
+export function uvToGeo(u, v, transform) {
+  const local = applyMatrix(transform.m, u, v);
   if (!local) {
     throw new Error('Transform is singular');
   }
@@ -408,13 +418,13 @@ export function imageToGeo(imageX, imageY, transform) {
 }
 
 /**
- * Transform geographic coordinates to image coordinates.
+ * Transform geographic coordinates to fractional image coordinates.
  * @param {number} lon
  * @param {number} lat
  * @param {Object} transform - Transform object {m, type, lon0, lat0}
- * @returns {Object} {imageX, imageY}
+ * @returns {Object} {u, v}
  */
-export function geoToImage(lon, lat, transform) {
+export function geoToUV(lon, lat, transform) {
   const inverseMatrix = invertMatrix(transform.m);
   if (!inverseMatrix) {
     throw new Error('Transform is singular');
@@ -424,21 +434,37 @@ export function geoToImage(lon, lat, transform) {
   if (!image) {
     throw new Error('Transform is singular');
   }
-  return { imageX: image.x, imageY: image.y };
+  return { u: image.x, v: image.y };
 }
 
 /**
- * Convert a ground distance in meters to an image-space distance in pixels.
- * The offset is applied in the local metric plane, where one degree of
- * longitude is weighted by cos(lat) and a ground distance is isotropic, and is
- * split across both axes so no single axis is privileged.
+ * The divisor that maps image pixels to the [0, 1] fractional frame:
+ * `u = imageX / D`, `v = imageY / D`. One divisor for both axes makes the
+ * change of coordinates a similarity of the plane, so a similarity fitted on
+ * (u, v) is still a similarity in metres; per-axis scaling would turn it into
+ * a rotated ellipse unless the image is square. Using max instead of width
+ * keeps both coordinates within [0, 1] for any aspect ratio.
+ * @param {number} imageWidth
+ * @param {number} imageHeight
+ * @returns {number}
+ */
+export function imageDivisor(imageWidth, imageHeight) {
+  return Math.max(imageWidth, imageHeight);
+}
+
+/**
+ * Convert a ground distance in meters to a distance in fractional image
+ * units (multiply by the divisor to get pixels). The offset is applied in the
+ * local metric plane, where one degree of longitude is weighted by cos(lat)
+ * and a ground distance is isotropic, and is split across both axes so no
+ * single axis is privileged.
  * @param {number} lon
  * @param {number} lat
  * @param {number} meters
  * @param {Object} transform - Transform object {m, type, lon0, lat0}
- * @returns {number} Distance in image pixels
+ * @returns {number} Distance in fractional image units
  */
-export function geoDistanceToImagePixels(lon, lat, meters, transform) {
+export function geoDistanceToUV(lon, lat, meters, transform) {
   const { lon0, lat0 } = transform;
   const component = meters / Math.SQRT2;
   const local = lonLatToLocalMeters(lon, lat, lon0, lat0);
@@ -449,9 +475,9 @@ export function geoDistanceToImagePixels(lon, lat, meters, transform) {
     lat0
   );
 
-  const start = geoToImage(lon, lat, transform);
-  const end = geoToImage(offset.lon, offset.lat, transform);
-  return Math.hypot(end.imageX - start.imageX, end.imageY - start.imageY);
+  const start = geoToUV(lon, lat, transform);
+  const end = geoToUV(offset.lon, offset.lat, transform);
+  return Math.hypot(end.u - start.u, end.v - start.v);
 }
 
 /**
