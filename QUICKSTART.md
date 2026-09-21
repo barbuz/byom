@@ -192,13 +192,15 @@ npm run deploy
 {
   id: 1,                    // Auto-increment
   mapId: 1,                 // Foreign key to maps
-  imageX: 1024,             // Image pixel X
-  imageY: 768,              // Image pixel Y
+  u: 0.512,                 // Image X as a fraction of max(width, height)
+  v: 0.384,                 // Image Y as a fraction of max(width, height)
   lon: -122.4194,           // Longitude
   lat: 37.7749,             // Latitude
   timestamp: 1234567890     // Creation time
 }
 ```
+
+Coordinates are fractional (`u`, `v` in `[0,1]` of the image's longest side) rather than pixels, so a reference point keeps its meaning when the image is re-encoded at a different resolution. Legacy rows storing `imageX`/`imageY` pixels are converted on first boot by `migrateLegacyPoints`.
 
 ## Customization Ideas
 

@@ -26,7 +26,7 @@ describe('applyImageTransform', () => {
 describe('drawPendingPoint', () => {
   it('draws two concentric circles at the pending point', () => {
     const ctx = fakeCtx();
-    drawPendingPoint(ctx, { imageX:  50, imageY:  60 }, { scale:  1, rotation:   0, translateX:  0, translateY:  0 },  100,  80);
+    drawPendingPoint(ctx, { u: 0.5, v: 0.6 }, { scale:  1, rotation:   0, translateX:  0, translateY:  0 },  100,  80);
     expect(ctx.calls.map(c => c[0]).filter(n => n === 'arc').length).toBe(2);
     expect(ctx.calls.filter(c => c[0] === 'arc')[0][1].slice(0,  2)).toEqual([50, 60]);
     expect(ctx.calls.filter(c => c[0] === 'arc')[1][1].slice(0,  2)).toEqual([50, 60]);
@@ -37,13 +37,13 @@ describe('drawPendingPoint', () => {
 describe('drawReferencePoints', () => {
   it('skips hidden points (showingPoints=false, no editing)', () => {
     const ctx = fakeCtx();
-    drawReferencePoints(ctx, [{ id:  1, imageX:  10, imageY:  10 }], { scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80, {});
+    drawReferencePoints(ctx, [{ id:  1, u: 0.1, v: 0.1 }], { scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80, {});
     expect(ctx.calls).toHaveLength(0);
    });
 
  it('draws a visible point with fill, stroke,and counter-rotated label', () => {
     const ctx = fakeCtx();
-    drawReferencePoints(ctx, [{ id:  1, imageX:  10, imageY:  10 }], { scale:  2, rotation:  0, translateX:  0, translateY:  0 },  100,  80, { showingPoints:  true });
+    drawReferencePoints(ctx, [{ id:  1, u: 0.1, v: 0.1 }], { scale:  2, rotation:  0, translateX:  0, translateY:  0 },  100,  80, { showingPoints:  true });
     expect(ctx.calls.map(c => c[0]).filter(n => n === 'arc').length).toBeGreaterThanOrEqual(1);
     const labels = ctx.calls.filter(c => c[0] === 'fillText');
     expect(labels).toHaveLength(1);
@@ -54,7 +54,7 @@ describe('drawReferencePoints', () => {
 
  it('uses editing color when editingPointId matches', () => {
     const ctx = fakeCtx();
-    drawReferencePoints(ctx, [{ id:  1, imageX:  10, imageY:  10 }], { scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80, { showingPoints:  1, editingPointId:  1 });
+    drawReferencePoints(ctx, [{ id:  1, u: 0.1, v: 0.1 }], { scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80, { showingPoints:  1, editingPointId:  1 });
     expect(ctx.fs).toBe('white');
    });
 
@@ -62,11 +62,11 @@ describe('drawReferencePoints', () => {
     const ctx = fakeCtx();
     drawReferencePoints(
       ctx,
-      [{ id:  1, imageX:  10, imageY:  10, lon:  1, lat:  2, accuracy:  100 }],
+      [{ id:  1, u: 0.1, v: 0.1, lon:  1, lat:  2, accuracy:  100 }],
       { scale:  2, rotation:  0.5, translateX:  0, translateY:  0 },
       100,
       80,
-      { showingPoints:  true, geoTransform: { m: [100, 0, 0, 0, 100, 0, 0, 0, 1], type: 'similarity', lon0: 1, lat0: 2 } }
+      { showingPoints:  true, geoTransform: { m: [10000, 0, 0, 0, 10000, 0, 0, 0, 1], type: 'similarity', lon0: 1, lat0: 2 } }
     );
     const arcs = ctx.calls.filter(c => c[0] === 'arc');
     expect(arcs.length).toBeGreaterThanOrEqual(2);
@@ -78,11 +78,11 @@ describe('drawReferencePoints', () => {
     const ctx = fakeCtx();
     drawReferencePoints(
       ctx,
-      [{ id: 1, imageX: 10, imageY: 10, lon: 1, lat: 2, accuracy: 100 }],
+      [{ id: 1, u: 0.1, v: 0.1, lon: 1, lat: 2, accuracy: 100 }],
       { scale: 2, rotation: 0.5, translateX: 0, translateY: 0 },
       100,
       80,
-      { showingPoints: true, geoTransform: { m: [100, 0, 0, 0, 100, 0, 0, 0, 1], type: 'similarity', lon0: 1, lat0: 2 } }
+      { showingPoints: true, geoTransform: { m: [10000, 0, 0, 0, 10000, 0, 0, 0, 1], type: 'similarity', lon0: 1, lat0: 2 } }
     );
     const fs = ctx.calls.filter(c => c[0] === 'fillStyle');
     const ss = ctx.calls.filter(c => c[0] === 'strokeStyle');
@@ -119,7 +119,7 @@ describe('drawUserMarker', () => {
 
  it('draws position marker when geoTransform is provided', () => {
     const ctx = fakeCtx();
-    const geoTransform = { m: [100, 0, 0, 0, 100, 0, 0, 0, 1], type: 'similarity', lon0: 0, lat0: 0 };
+    const geoTransform = { m: [10000, 0, 0, 0, 10000, 0, 0, 0, 1], type: 'similarity', lon0: 0, lat0: 0 };
     drawUserMarker(ctx, { longitude:  0, latitude:  0, accuracy:  5 },  geoTransform,{ scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80);
     expect(ctx.calls.filter(c => c[0] === 'arc').length).toBeGreaterThanOrEqual(1);
     expect(ctx.calls.filter(c => c[0] === 'restore')).toHaveLength(1);

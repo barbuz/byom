@@ -1,7 +1,7 @@
 <script>
   import { untrack } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
-  import { calculateTransform, geoToImage, geoDistanceToImagePixels } from './lib/transforms.js';
+  import { calculateTransform, geoToUV, geoDistanceToUV, imageDivisor } from './lib/transforms.js';
   import { screenToImage, getPointAtScreen, pinchZoomTransform, centerOnImagePoint } from './lib/viewport.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
@@ -165,6 +165,18 @@
     transform.translateY = canvasHeight / 2;
   }
 
+  /** Pixels -> [0,1] fractions using the single divisor D = max(width, height). */
+  function pixelsToUV(x, y) {
+    const divisor = imageDivisor(imageWidth, imageHeight);
+    return { u: x / divisor, v: y / divisor };
+  }
+
+  /** [0,1] fractions -> pixels, for the pixel-space rendering/viewport edges. */
+  function uvToPixels(point) {
+    const divisor = imageDivisor(imageWidth, imageHeight);
+    return { ...point, imageX: point.u * divisor, imageY: point.v * divisor };
+  }
+
   function scheduleRender() {
     if (needsRender) return;
     needsRender = true;
@@ -201,28 +213,29 @@
     referencePoints.forEach((point, index) => {
       const isHovered = hoverPointIndex === index;
       const isEditing = editingPoint && editingPoint.id === point.id;
+      const { imageX, imageY } = uvToPixels(point);
       
       if (showingPoints || isEditing) {
         // Draw accuracy ring if the point was captured with GPS accuracy
         if (point.accuracy && geoTransform) {
-          const accuracyRadius = geoDistanceToImagePixels(
+          const accuracyRadius = geoDistanceToUV(
             point.lon,
             point.lat,
             point.accuracy,
             geoTransform
-          );
+          ) * imageDivisor(imageWidth, imageHeight);
           ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
           ctx.strokeStyle = 'rgba(33, 150, 243, 0.35)';
           ctx.lineWidth = 2;
           ctx.beginPath();
-          ctx.arc(point.imageX, point.imageY, accuracyRadius, 0, Math.PI * 2);
+          ctx.arc(imageX, imageY, accuracyRadius, 0, Math.PI * 2);
           ctx.fill();
           ctx.stroke();
         }
 
         ctx.fillStyle = isEditing ? 'rgba(255, 152, 0, 0.9)' : isHovered ? 'rgba(33, 150, 243, 0.9)' : 'rgba(33, 150, 243, 0.7)';
         ctx.beginPath();
-        ctx.arc(point.imageX, point.imageY, isHovered || isEditing ? 12 : 8, 0, Math.PI * 2);
+        ctx.arc(imageX, imageY, isHovered || isEditing ? 12 : 8, 0, Math.PI * 2);
         ctx.fill();
         ctx.strokeStyle = 'white';
         ctx.lineWidth = isEditing ? 3 : 2;
@@ -230,7 +243,7 @@
         
         // Draw number label
         ctx.save();
-        ctx.translate(point.imageX, point.imageY);
+        ctx.translate(imageX, imageY);
         ctx.scale(1 / transform.scale, 1 / transform.scale);
         ctx.rotate(-transform.rotation);
         
@@ -264,6 +277,7 @@
 
     // Draw pending reference point
     if (pendingReferencePoint) {
+      const pending = uvToPixels(pendingReferencePoint);
       ctx.save();
       ctx.translate(transform.translateX, transform.translateY);
       ctx.rotate(transform.rotation);
@@ -273,7 +287,7 @@
       // Draw pending point marker
       ctx.fillStyle = 'rgba(255, 152, 0, 0.9)';
       ctx.beginPath();
-      ctx.arc(pendingReferencePoint.imageX, pendingReferencePoint.imageY, 15, 0, Math.PI * 2);
+      ctx.arc(pending.imageX, pending.imageY, 15, 0, Math.PI * 2);
       ctx.fill();
       ctx.strokeStyle = 'white';
       ctx.lineWidth = 3;
@@ -283,7 +297,7 @@
       ctx.strokeStyle = 'rgba(255, 152, 0, 0.5)';
       ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(pendingReferencePoint.imageX, pendingReferencePoint.imageY, 20, 0, Math.PI * 2);
+      ctx.arc(pending.imageX, pending.imageY, 20, 0, Math.PI * 2);
       ctx.stroke();
 
       ctx.restore();
@@ -399,9 +413,10 @@
     const imageCoords = screenToImage(screenX, screenY, transform, imageWidth, imageHeight);
     
     if (imageCoords) {
+      const { u, v } = pixelsToUV(imageCoords.x, imageCoords.y);
       pendingReferencePoint = {
-        imageX: imageCoords.x,
-        imageY: imageCoords.y,
+        u,
+        v,
         screenX: screenX,
         screenY: screenY
       };
@@ -415,7 +430,7 @@
   function handlePointEditing(screenX, screenY) {
     if (!showingPoints) return false;
     
-    const pointIndex = getPointAtScreen(screenX, screenY, referencePoints, transform, imageWidth, imageHeight);
+    const pointIndex = getPointAtScreen(screenX, screenY, referencePoints.map(uvToPixels), transform, imageWidth, imageHeight);
 
     if (pointIndex < 0) return false;
     
@@ -449,7 +464,7 @@
     
     // Handle hover effects for points
     if (showingPoints) {
-      const pointIndex = getPointAtScreen(x, y, referencePoints, transform, imageWidth, imageHeight);
+      const pointIndex = getPointAtScreen(x, y, referencePoints.map(uvToPixels), transform, imageWidth, imageHeight);
       
       if (pointIndex !== hoverPointIndex) {
         hoverPointIndex = pointIndex;
@@ -512,7 +527,9 @@
 
     let imageCoords;
     try {
-      imageCoords = geoToImage(position.longitude, position.latitude, geoTransform);
+      const { u, v } = geoToUV(position.longitude, position.latitude, geoTransform);
+      const divisor = imageDivisor(imageWidth, imageHeight);
+      imageCoords = { imageX: u * divisor, imageY: v * divisor };
     } catch (error) {
       console.error('Error centering on user position:', error);
       return;
@@ -822,7 +839,7 @@
     // rather than persisting a set that renders the map unusable.
     const candidate = [
       ...referencePoints,
-      { imageX: pendingReferencePoint.imageX, imageY: pendingReferencePoint.imageY, lon: selectedLon, lat: selectedLat },
+      { u: pendingReferencePoint.u, v: pendingReferencePoint.v, lon: selectedLon, lat: selectedLat },
     ];
     const transformError = transformErrorFor(candidate);
     if (transformError) {
@@ -834,8 +851,8 @@
       const { addReferencePoint } = await import('./lib/db.js');
       await addReferencePoint({
         mapId: parseInt(mapId),
-        imageX: pendingReferencePoint.imageX,
-        imageY: pendingReferencePoint.imageY,
+        u: pendingReferencePoint.u,
+        v: pendingReferencePoint.v,
         lon: selectedLon,
         lat: selectedLat,
         accuracy: selectedAccuracy,
@@ -971,7 +988,7 @@
         <div class="point-edit-info">
           <div class="info-row">
             <strong>Image coordinates:</strong>
-            <span>({editingPoint.imageX.toFixed(0)}, {editingPoint.imageY.toFixed(0)})</span>
+            <span>({editingPoint.u.toFixed(3)}, {editingPoint.v.toFixed(3)})</span>
           </div>
         </div>
         
@@ -1032,10 +1049,10 @@
                 <span>{userPositionMarker.userPosition.accuracy?.toFixed(0)}m</span>
               </div>
               {#if geoTransform}
-                {@const imgCoords = geoToImage(userPositionMarker.userPosition.longitude, userPositionMarker.userPosition.latitude, geoTransform)}
+                {@const imgCoords = geoToUV(userPositionMarker.userPosition.longitude, userPositionMarker.userPosition.latitude, geoTransform)}
                 <div class="info-row">
                   <strong>Image Coordinates:</strong>
-                  <span>({imgCoords.imageX.toFixed(1)}, {imgCoords.imageY.toFixed(1)})</span>
+                  <span>({imgCoords.u.toFixed(3)}, {imgCoords.v.toFixed(3)})</span>
                 </div>
               {/if}
             </div>
@@ -1075,7 +1092,7 @@
                   </div>
                   <div class="info-row">
                     <strong>Image:</strong>
-                    <span>({point.imageX.toFixed(1)}, {point.imageY.toFixed(1)})</span>
+                    <span>({point.u.toFixed(3)}, {point.v.toFixed(3)})</span>
                   </div>
                   {#if point.accuracy}
                     <div class="info-row">
@@ -1136,7 +1153,7 @@
         <div class="point-edit-info">
           <div class="info-row">
             <strong>Image coordinates:</strong>
-            <span>({pendingReferencePoint.imageX.toFixed(0)}, {pendingReferencePoint.imageY.toFixed(0)})</span>
+            <span>({pendingReferencePoint.u.toFixed(3)}, {pendingReferencePoint.v.toFixed(3)})</span>
           </div>
         </div>
 

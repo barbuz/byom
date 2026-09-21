@@ -63,10 +63,18 @@ class MapImage extends FakeImage {
   }
 }
 
+// The viewer's image is 800x600, so the single divisor is 800. These points
+// describe the same pixels as the old (100,100) and (700,500): u = x / 800.
+const IMAGE_DIVISOR = 800;
 const REF_POINTS = [
-  { id: 1, mapId: 1, imageX:  100, imageY:  100, lon: -74.0, lat:  40.0, accuracy: null },
-   { id:  2, mapId:  1, imageX:  700, imageY:  500, lon: -73.0, lat:  41.0, accuracy: null },
- ];
+  { id: 1, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -74.0, lat: 40.0, accuracy: null },
+  { id: 2, mapId: 1, u: 700 / IMAGE_DIVISOR, v: 500 / IMAGE_DIVISOR, lon: -73.0, lat: 41.0, accuracy: null },
+];
+
+/** Where a stored point sits, in image pixels. */
+function pointPixels(point) {
+  return { x: point.u * IMAGE_DIVISOR, y: point.v * IMAGE_DIVISOR };
+}
 
 const sleep = (ms) => new Promise((resolve) => {
   setTimeout(resolve, ms);
@@ -443,11 +451,11 @@ describe("MapViewer GPS flows", () => {
     await screen.findByText(/-73.500000/);
     await screen.findByText(/20m/);
 
-    const { geoToImage, calculateTransform } = await import("../../lib/transforms.js");
+    const { geoToUV, calculateTransform } = await import("../../lib/transforms.js");
     const transform = calculateTransform(REF_POINTS);
-    const computed = geoToImage(-73.5, 40.5, transform);
+    const computed = geoToUV(-73.5, 40.5, transform);
     await screen.findByText(
-      new RegExp(`${computed.imageX.toFixed(1)}, ${computed.imageY.toFixed(1)}`)
+      new RegExp(`${computed.u.toFixed(3)}, ${computed.v.toFixed(3)}`)
     );
   });
 
@@ -471,8 +479,9 @@ describe("MapViewer GPS flows", () => {
     assert.equal(addReferencePoint.mock.calls.length, 1);
     const args = addReferencePoint.mock.calls[0][0];
     assert.equal(args.mapId, 1);
-    assert.equal(args.imageX, 400);
-    assert.equal(args.imageY, 300);
+    // The pending point was captured at the centre of the 800x600 image.
+    assert.equal(args.u, 400 / IMAGE_DIVISOR);
+    assert.equal(args.v, 300 / IMAGE_DIVISOR);
     assert.equal(args.lon, -74.0060);
     assert.equal(args.lat, 40.7128);
     assert.equal(args.accuracy, 10);
@@ -549,15 +558,17 @@ describe("MapViewer center on user", () => {
     fireEvent.click(button);
     await sleep(30);
 
-    const { geoToImage, calculateTransform } = await import("../../lib/transforms.js");
+    const { geoToUV, calculateTransform } = await import("../../lib/transforms.js");
     const geoTransform = calculateTransform(REF_POINTS);
-    const image = geoToImage(-73.5, 40.5, geoTransform);
+    const image = geoToUV(-73.5, 40.5, geoTransform);
+    const imageX = image.u * IMAGE_DIVISOR;
+    const imageY = image.v * IMAGE_DIVISOR;
 
     const canvasWidth = window.innerWidth;
     const canvasHeight = window.innerHeight;
     const scale = Math.min(canvasWidth / 800, canvasHeight / 600) * 0.9;
-    const expectedX = canvasWidth / 2 - (image.imageX - 400) * scale;
-    const expectedY = canvasHeight / 2 - (image.imageY - 300) * scale;
+    const expectedX = canvasWidth / 2 - (imageX - 400) * scale;
+    const expectedY = canvasHeight / 2 - (imageY - 300) * scale;
 
     const offset = viewOffset();
     assert.ok(Math.abs(offset[0] - expectedX) < 1e-6, `x ${offset[0]} vs ${expectedX}`);
@@ -571,8 +582,8 @@ describe("MapViewer degenerate georeference", () => {
   // load failure, or the map is permanently unopenable and the offending
   // points can never be fixed or deleted.
   const DUPLICATE_GPS_POINTS = [
-    { id: 1, mapId: 1, imageX: 100, imageY: 100, lon: -74.0, lat: 40.0, accuracy: null },
-    { id: 2, mapId: 1, imageX: 700, imageY: 500, lon: -74.0, lat: 40.0, accuracy: null },
+    { id: 1, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -74.0, lat: 40.0, accuracy: null },
+    { id: 2, mapId: 1, u: 700 / IMAGE_DIVISOR, v: 500 / IMAGE_DIVISOR, lon: -74.0, lat: 40.0, accuracy: null },
   ];
 
   it("still opens the map and shows the georeference error", async () => {
@@ -612,9 +623,10 @@ describe("MapViewer degenerate georeference", () => {
     const canvasWidth = window.innerWidth;
     const canvasHeight = window.innerHeight;
     const scale = Math.min(canvasWidth / 800, canvasHeight / 600) * 0.9;
+    const first = pointPixels(REF_POINTS[0]);
     clickCanvasAt(
-      canvasWidth / 2 + (100 - 400) * scale,
-      canvasHeight / 2 + (100 - 300) * scale,
+      canvasWidth / 2 + (first.x - 400) * scale,
+      canvasHeight / 2 + (first.y - 300) * scale,
     );
     await screen.findByText(/Edit Point #1/);
 
@@ -661,8 +673,9 @@ describe("MapViewer point editing", () => {
     const canvasWidth = window.innerWidth;
     const canvasHeight = window.innerHeight;
     const scale = Math.min(canvasWidth / 800, canvasHeight / 600) * 0.9;
-    const screenX = canvasWidth / 2 + (100 - 400) * scale;
-    const screenY = canvasHeight / 2 + (100 - 300) * scale;
+    const first = pointPixels(REF_POINTS[0]);
+    const screenX = canvasWidth / 2 + (first.x - 400) * scale;
+    const screenY = canvasHeight / 2 + (first.y - 300) * scale;
     clickCanvasAt(screenX, screenY);
     await flushPromises();
     await screen.findByText(/Edit Point #1/);
