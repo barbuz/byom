@@ -1048,6 +1048,12 @@
                 <strong>Accuracy:</strong>
                 <span>{userPositionMarker.userPosition.accuracy?.toFixed(0)}m</span>
               </div>
+              {#if userPositionMarker.positionStale}
+                <div class="info-row">
+                  <strong>Status:</strong>
+                  <span>⚠️ Stale fix — refreshing</span>
+                </div>
+              {/if}
               {#if geoTransform}
                 {@const imgCoords = geoToUV(userPositionMarker.userPosition.longitude, userPositionMarker.userPosition.latitude, geoTransform)}
                 <div class="info-row">

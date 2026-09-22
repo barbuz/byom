@@ -90,7 +90,7 @@ export function drawPendingPoint(ctx, pendingPoint, transform, imageWidth, image
   ctx.stroke();
 }
 
-export function drawUserMarker(ctx, position, geoTransform, transform, imageWidth, imageHeight) {
+export function drawUserMarker(ctx, position, geoTransform, transform, imageWidth, imageHeight, stale = false) {
   if (!position || !geoTransform) return;
 
   try {
@@ -101,6 +101,23 @@ export function drawUserMarker(ctx, position, geoTransform, transform, imageWidt
 
     ctx.save();
     applyImageTransform(ctx, transform, imageWidth, imageHeight);
+
+    // A stale fix is a frozen coordinate whose reported accuracy has ceased to
+    // mean anything; drawing its ballooning ring would imply a precision we do
+    // not have. Show a hollow, dashed marker instead.
+    if (stale) {
+      ctx.strokeStyle = 'rgba(175, 76, 80, 0.8)';
+      ctx.fillStyle =	'rgba(175, 76, 80, 0.15)';
+      ctx.lineWidth =	3;
+      ctx.setLineDash([6, 6]);
+      ctx.beginPath();
+      ctx.arc(x, y, 20, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.setLineDash([]);
+      ctx.restore();
+      return;
+    }
 
     if (position.accuracy) {
       const accuracyInPixels =	geoDistanceToUV(position.longitude, position.latitude, position.accuracy, geoTransform) * divisor;

@@ -1,4 +1,4 @@
-import { describe, it, vi, beforeEach } from "vitest";
+import { describe, it, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/svelte";
 import { flushPromises, FakeImage } from "../../../tests/setup.js";
 import MapViewer from "../../MapViewer.svelte";
@@ -723,5 +723,33 @@ describe("MapViewer point editing", () => {
 
     assert.equal(updateReferencePoint.mock.calls.length, 0);
     assert.equal(window.alert.mock.calls.length, 1);
+  });
+});
+
+describe("MapViewer stale GPS", () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("debug modal shows a stale warning when the watchdog flags the fix", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+
+    const id = firstWatchId();
+    globalThis.__geolocationTestUtil.emitWatchPosition(id, {
+      latitude: 40.5,
+      longitude: -73.5,
+      accuracy: 20,
+    });
+    await flushPromises();
+
+    fireEvent.click(screen.getByText(/Debug/));
+    await screen.findByText(/40.500000/);
+
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+
+    await screen.findByText(/Stale fix/);
   });
 });

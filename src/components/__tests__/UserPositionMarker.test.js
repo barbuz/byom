@@ -212,3 +212,218 @@ describe("UserPositionMarker", () => {
     assert.ok(markerRadius <8);
   });
 });
+function watchIds() {
+  const watchers = globalThis.__geolocationTestUtil.getWatchers();
+  const list = [...watchers.keys()];
+  return list;
+}
+
+// Fake only the watchdog's clock and interval; setTimeout stays real so
+// flushPromises and Svelte's own scheduling keep working.
+function useWatchdogTimers() {
+  vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+}
+
+describe("UserPositionMarker watchdog", () => {
+  beforeEach(() => {
+    globalThis.__canvasTestUtil.reset();
+    const calls = getCtxCalls();
+    calls.length = 0;
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it("re-arms the watch and flags staleness when no fix ever arrives", async () => {
+    useWatchdogTimers();
+    const scheduleRender = vi.fn();
+    const result = render(UserPositionMarker, { props: { scheduleRender } });
+    const component = result.component;
+    const before = watchIds();
+    assert.equal(before.length, 1);
+    assert.equal(component.positionStale, false);
+
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+
+    const after = watchIds();
+    assert.equal(after.length, 1);
+    assert.notEqual(after[0], before[0]);
+    assert.equal(component.positionStale, true);
+  });
+
+  it("does not re-arm while fresh fixes keep arriving", async () => {
+    useWatchdogTimers();
+    const scheduleRender = vi.fn();
+    render(UserPositionMarker, { props: { scheduleRender } });
+    const before = watchIds();
+
+    for (let i = 0; i < 6; i++) {
+      emitPosition({ latitude: 12.3, longitude: 45.6, accuracy: 8 });
+      vi.advanceTimersByTime(5000);
+      await flushPromises();
+    }
+
+    const after = watchIds();
+    assert.deepEqual(after, before);
+  });
+
+  it("re-arms when an existing fix goes stale", async () => {
+    useWatchdogTimers();
+    const scheduleRender = vi.fn();
+    const result = render(UserPositionMarker, { props: { scheduleRender } });
+    const component = result.component;
+    emitPosition({ latitude: 12.3, longitude: 45.6, accuracy: 8 });
+    await flushPromises();
+    const before = watchIds();
+
+    vi.advanceTimersByTime(10000);
+    await flushPromises();
+    assert.deepEqual(watchIds(), before);
+    assert.equal(component.positionStale, false);
+
+    vi.advanceTimersByTime(5000);
+    await flushPromises();
+    const after = watchIds();
+    assert.notEqual(after[0], before[0]);
+    assert.equal(component.positionStale, true);
+  });
+
+  it("clears the stale flag once a fresh fix arrives after re-arming", async () => {
+    useWatchdogTimers();
+    const scheduleRender = vi.fn();
+    const result = render(UserPositionMarker, { props: { scheduleRender } });
+    const component = result.component;
+
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+    assert.equal(component.positionStale, true);
+
+    emitPosition({ latitude: 1, longitude: 2, accuracy: 5 });
+    await flushPromises();
+    assert.equal(component.positionStale, false);
+  });
+
+  function setVisibility(value) {
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      value,
+    });
+    document.dispatchEvent(new Event("visibilitychange"));
+  }
+
+  it("re-arms on becoming visible again", async () => {
+    useWatchdogTimers();
+    const scheduleRender = vi.fn();
+    render(UserPositionMarker, { props: { scheduleRender } });
+    const before = watchIds();
+    const renderCallsBefore = scheduleRender.mock.calls.length;
+
+    setVisibility("hidden");
+    // Stand in for time spent in another app, the user's current workaround.
+    vi.advanceTimersByTime(4000);
+    setVisibility("visible");
+    await flushPromises();
+
+    const after = watchIds();
+    assert.notEqual(after[0], before[0]);
+    assert.ok(scheduleRender.mock.calls.length > renderCallsBefore);
+    delete document.visibilityState;
+  });
+
+  it("ignores visibility changes while the page is hidden", async () => {
+    const scheduleRender = vi.fn();
+    render(UserPositionMarker, { props: { scheduleRender } });
+    const before = watchIds();
+
+    setVisibility("hidden");
+    await flushPromises();
+
+    assert.deepEqual(watchIds(), before);
+    delete document.visibilityState;
+  });
+
+  it("re-arms on pageshow", async () => {
+    useWatchdogTimers();
+    const scheduleRender = vi.fn();
+    render(UserPositionMarker, { props: { scheduleRender } });
+    const before = watchIds();
+
+    window.dispatchEvent(new Event("pageshow"));
+    await flushPromises();
+
+    const after = watchIds();
+    assert.notEqual(after[0], before[0]);
+  });
+
+  it("does not re-arm for an incidental visibility blip", async () => {
+    useWatchdogTimers();
+    const scheduleRender = vi.fn();
+    render(UserPositionMarker, { props: { scheduleRender } });
+
+    setVisibility("hidden");
+    setVisibility("visible");
+    await flushPromises();
+    const afterFirst = watchIds();
+
+    // A second blip straight away must not tear the fresh watch down again.
+    setVisibility("hidden");
+    setVisibility("visible");
+    await flushPromises();
+    assert.deepEqual(watchIds(), afterFirst);
+    delete document.visibilityState;
+  });
+
+  it("stops the watchdog and listeners on destroy", async () => {
+    useWatchdogTimers();
+    const scheduleRender = vi.fn();
+    const result = render(UserPositionMarker, { props: { scheduleRender } });
+    assert.equal(watchCount(), 1);
+
+    result.unmount();
+    assert.equal(watchCount(), 0);
+
+    vi.advanceTimersByTime(60000);
+    await flushPromises();
+    assert.equal(watchCount(), 0);
+
+    window.dispatchEvent(new Event("pageshow"));
+    await flushPromises();
+    assert.equal(watchCount(), 0);
+  });
+
+  it("draws a hollow dashed marker when the fix is stale", async () => {
+    useWatchdogTimers();
+    const scheduleRender = vi.fn();
+    const canvas = document.createElement("canvas");
+    const ctx = canvas.getContext("2d");
+    const result = render(UserPositionMarker, {
+      props: { scheduleRender, geoTransform: SIM },
+    });
+    const component = result.component;
+    emitPosition({ latitude: 20, longitude: 10, accuracy: 5000 });
+    await flushPromises();
+
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+    assert.equal(component.positionStale, true);
+
+    ctx.ctxCalls.length = 0;
+    component.drawUserPosition(ctx);
+    const filtered = ctx.ctxCalls.filter(function (c) {
+      return c[0] !== "getContext";
+    });
+    const arcs = filtered.filter(function (c) {
+      return c[0] === "arc";
+    });
+    const dashes = filtered.filter(function (c) {
+      return c[0] === "setLineDash";
+    });
+    assert.equal(arcs.length, 1);
+    assert.equal(dashes.length, 2);
+    assert.equal(filtered.filter(function (c) {
+      return c[0] === "restore";
+    }).length, 1);
+  });
+});
