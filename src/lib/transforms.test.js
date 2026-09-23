@@ -47,7 +47,8 @@ describe('imageDivisor', () => {
 
 describe('computeSimilarityTransform', () => {
   it('fits scale, rotation and translation in a local metric plane', () => {
-    // A 100x100 image, so D = 100 and the fractions are the pixels / 100.
+    // A 100x100 image, so D = 100 and the fractions are the pixels / 100. The
+    // two points run due east along the image's top edge (constant v).
     const refs = [
       { u: 0, v: 0, lon: 10, lat: 20 },
       { u: 1, v: 0, lon: 12, lat: 20 },
@@ -64,13 +65,16 @@ describe('computeSimilarityTransform', () => {
     expect(t.m[6]).toBe(0);
     expect(t.m[7]).toBe(0);
 
-    // Uniform scale is metres per fraction unit; the linear part is that scale
-    // rotated by zero, since the two points run due east in both spaces.
+    // Uniform scale is metres per fraction unit. The linear block sends u to
+    // +east and v to -north, because the image's y axis points down (canvas
+    // convention) while metric north points up on a north-up map. The map is
+    // therefore orientation-reversing, so the determinant is negative.
     const scale = 2 * metersPerDegreeLon(20) / 1;
     expect(t.m[0]).toBeCloseTo(scale, 6);
     expect(t.m[1]).toBeCloseTo(0, 6);
     expect(t.m[3]).toBeCloseTo(0, 6);
-    expect(t.m[4]).toBeCloseTo(scale, 6);
+    expect(t.m[4]).toBeCloseTo(-scale, 6);
+    expect(t.m[0] * t.m[4] - t.m[1] * t.m[3]).toBeLessThan(0);
 
     // Reference points map exactly onto their fractional image coordinates.
     const a = geoToUV(refs[0].lon, refs[0].lat, t);
@@ -82,42 +86,80 @@ describe('computeSimilarityTransform', () => {
   });
 
   it('is exact for a correctly projected planar map at 45° latitude with rotation', () => {
-    // Map projection: pixel -> ground metres (rotated) -> degrees, about a
-    // fixed origin. Latitude 45° makes lon/lat anisotropy 1.41x, which degree
-    // space cannot represent but a metric-plane similarity can. The stored
-    // coordinates are the pixels divided by D.
+    // Map projection: fraction -> ground metres -> degrees, about a fixed
+    // origin. The ground truth is a rotated map seen with the image's y axis
+    // pointing down, so it is s·R(θ)·diag(1, -1): a similarity composed with
+    // the y-down reflection. Latitude 45° makes lon/lat anisotropy 1.41x,
+    // which degree space cannot represent but a metric-plane fit can.
     const originLon = 8;
     const originLat = 45;
     const mPerDegLon = metersPerDegreeLon(originLat);
     const metersPerPixel = 8;
     const divisor = 1000;
+    const metersPerFraction = metersPerPixel * divisor;
     const mapRotation = 25 * Math.PI / 180;
+    const cos = Math.cos(mapRotation);
+    const sin = Math.sin(mapRotation);
 
-    const pxToLonLat = (x, y) => ({
-      lon: originLon + metersPerPixel * (Math.cos(mapRotation) * x - Math.sin(mapRotation) * y) / mPerDegLon,
-      lat: originLat + metersPerPixel * (Math.sin(mapRotation) * x + Math.cos(mapRotation) * y) / METERS_PER_DEG_LAT,
+    const fracToLonLat = (u, v) => ({
+      lon: originLon + metersPerFraction * (cos * u + sin * v) / mPerDegLon,
+      lat: originLat + metersPerFraction * (sin * u - cos * v) / METERS_PER_DEG_LAT,
     });
 
     // Reference points symmetric about the map origin, so the centroid the
     // transform uses as its projection origin coincides with it.
     const refs = [
-      { u: -300 / divisor, v: -200 / divisor, ...pxToLonLat(-300, -200) },
-      { u: 300 / divisor, v: 200 / divisor, ...pxToLonLat(300, 200) },
+      { u: -300 / divisor, v: -200 / divisor, ...fracToLonLat(-300 / divisor, -200 / divisor) },
+      { u: 300 / divisor, v: 200 / divisor, ...fracToLonLat(300 / divisor, 200 / divisor) },
     ];
     const t = computeSimilarityTransform(refs);
 
-    // The linear block is metres-per-fraction-unit times the map rotation.
-    const metersPerFraction = metersPerPixel * divisor;
-    expect(t.m[0]).toBeCloseTo(metersPerFraction * Math.cos(mapRotation), 6);
-    expect(t.m[1]).toBeCloseTo(-metersPerFraction * Math.sin(mapRotation), 6);
-    expect(t.m[3]).toBeCloseTo(metersPerFraction * Math.sin(mapRotation), 6);
-    expect(t.m[4]).toBeCloseTo(metersPerFraction * Math.cos(mapRotation), 6);
+    // The linear block is metres-per-fraction-unit times the rotated y-flip.
+    expect(t.m[0]).toBeCloseTo(metersPerFraction * cos, 6);
+    expect(t.m[1]).toBeCloseTo(metersPerFraction * sin, 6);
+    expect(t.m[3]).toBeCloseTo(metersPerFraction * sin, 6);
+    expect(t.m[4]).toBeCloseTo(-metersPerFraction * cos, 6);
 
     for (const [x, y] of [[0, 0], [500, -400], [-900, 700], [123, -456]]) {
-      const geo = pxToLonLat(x, y);
+      const geo = fracToLonLat(x / divisor, y / divisor);
       const img = geoToUV(geo.lon, geo.lat, t);
       expect(img.u).toBeCloseTo(x / divisor, 6);
       expect(img.v).toBeCloseTo(y / divisor, 6);
+    }
+  });
+
+  it('does not mirror ground positions about the reference line', () => {
+    // The regression: a north-up map with two reference points on its top
+    // edge. The image y axis points down (south), so a point below the
+    // reference line is south of it. An orientation-preserving fit in (u, v)
+    // instead puts it the same distance NORTH, mirroring the whole map.
+    const originLon = 8;
+    const originLat = 45;
+    const mPerDegLon = metersPerDegreeLon(originLat);
+    const divisor = 1000;
+    // A 1 fraction unit per 8 m map, upright (no rotation).
+    const metersPerFraction = 8 * divisor;
+    const fracToLonLat = (u, v) => ({
+      lon: originLon + metersPerFraction * u / mPerDegLon,
+      lat: originLat - metersPerFraction * v / METERS_PER_DEG_LAT,
+    });
+
+    const refs = [
+      { u: 0, v: 0, ...fracToLonLat(0, 0) },
+      { u: 1, v: 0, ...fracToLonLat(1, 0) },
+    ];
+    const t = computeSimilarityTransform(refs);
+
+    // Below the reference line (v > 0) must be south of it.
+    const below = uvToGeo(0.5, 1, t);
+    expect(below.lat).toBeLessThan(refs[0].lat);
+    expect(below.lat).toBeCloseTo(fracToLonLat(0.5, 1).lat, 9);
+
+    // And the fit is exact across the whole map, not just on the line.
+    for (const [u, v] of [[0.25, 0.75], [1, 1], [0, 1], [0.9, 0.1]]) {
+      const geo = uvToGeo(u, v, t);
+      expect(geo.lon).toBeCloseTo(fracToLonLat(u, v).lon, 9);
+      expect(geo.lat).toBeCloseTo(fracToLonLat(u, v).lat, 9);
     }
   });
 

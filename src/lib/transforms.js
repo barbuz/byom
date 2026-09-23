@@ -265,6 +265,19 @@ function assertFinitePoints(points) {
 /**
  * Compute similarity transform (2 points): uniform scale, rotation and
  * translation, fitted in the local metric plane about the midpoint.
+ *
+ * The fit uses the image plane in its native orientation, where `v` grows
+ * downward (canvas/screen convention) while metric `north` grows upward. A
+ * north-up map therefore has its image y-axis and its metric north-axis
+ * pointing opposite ways, so the image-to-ground map is orientation-reversing
+ * and its linear block has a negative determinant. Fitting an
+ * orientation-preserving similarity in (u, v) silently mirrors the map: the
+ * two reference points still land exactly (4 equations, 4 DOF), but every
+ * other point is reflected about the reference line. Reflect `v` into an
+ * `up = -v` axis before measuring the image angle, and apply the reflection in
+ * the returned matrix, so the fit matches the convention the rest of the app
+ * renders in. See `computeAffineTransform`, whose extra degrees of freedom
+ * absorb the reflection implicitly.
  * @param {Array} referencePoints - [{u, v, lon, lat}, ...]
  * @returns {Object} Transform {m, type, lon0, lat0}
  */
@@ -292,16 +305,20 @@ export function computeSimilarityTransform(referencePoints) {
   }
 
   // Metres per fraction unit, and the rotation aligning the image to the
-  // metric plane.
+  // metric plane. The image angle is measured against the upward axis `-v`.
   const scale = distanceMetric / distanceImage;
-  const rotation = Math.atan2(dyMetric, dxMetric) - Math.atan2(dv, du);
+  const rotation = Math.atan2(dyMetric, dxMetric) - Math.atan2(-dv, du);
   const cos = Math.cos(rotation);
   const sin = Math.sin(rotation);
+  const a = scale * cos;
+  const b = scale * sin;
 
+  // east = a*u + b*v + tx, north = b*u - a*v + ty: a similarity composed with
+  // the image y-down reflection, so det = -(a^2 + b^2) < 0.
   return {
     m: [
-      scale * cos, -scale * sin, m1.east - (scale * cos * p1.u - scale * sin * p1.v),
-      scale * sin, scale * cos, m1.north - (scale * sin * p1.u + scale * cos * p1.v),
+      a, b, m1.east - (a * p1.u + b * p1.v),
+      b, -a, m1.north - (b * p1.u - a * p1.v),
       0, 0, 1,
     ],
     type: 'similarity',
