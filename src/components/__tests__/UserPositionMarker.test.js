@@ -259,9 +259,11 @@ describe("UserPositionMarker watchdog", () => {
     render(UserPositionMarker, { props: { scheduleRender } });
     const before = watchIds();
 
+    // Advance by one watchdog tick (WATCHDOG_INTERVAL_MS), which is shorter
+    // than STALE_AFTER_MS, so each fix arrives while it is still fresh.
     for (let i = 0; i < 6; i++) {
       emitPosition({ latitude: 12.3, longitude: 45.6, accuracy: 8 });
-      vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(2000);
       await flushPromises();
     }
 
@@ -278,12 +280,14 @@ describe("UserPositionMarker watchdog", () => {
     await flushPromises();
     const before = watchIds();
 
-    vi.advanceTimersByTime(10000);
+    // Still within STALE_AFTER_MS of the fix, so no re-arm yet.
+    vi.advanceTimersByTime(2000);
     await flushPromises();
     assert.deepEqual(watchIds(), before);
     assert.equal(component.positionStale, false);
 
-    vi.advanceTimersByTime(5000);
+    // Cross STALE_AFTER_MS: the fix is now stale and the watch is rebuilt.
+    vi.advanceTimersByTime(4000);
     await flushPromises();
     const after = watchIds();
     assert.notEqual(after[0], before[0]);
