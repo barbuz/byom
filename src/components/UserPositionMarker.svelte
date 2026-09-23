@@ -4,14 +4,14 @@
   // Android's fused location provider can hand out a frozen fix whose reported
   // accuracy grows without bound, and Chromium's single long-lived watch never
   // re-requests one. These constants drive a watchdog that re-arms the watch.
-  const WATCHDOG_INTERVAL_MS = 5000;
+  const WATCHDOG_INTERVAL_MS = 2000;
   // A fix older than this is treated as stale and triggers a re-arm.
-  const STALE_AFTER_MS = 15000;
+  const STALE_AFTER_MS = 5000;
   // If the first fix of a watch never arrives, give up on it and re-arm.
-  const FIRST_FIX_TIMEOUT_MS = 15000;
+  const FIRST_FIX_TIMEOUT_MS = 5000;
   // Floor between watchdog-driven re-arms; without it a provider that never
   // answers would be torn down and rebuilt on every tick.
-  const REARM_COOLDOWN_MS = 10000;
+  const REARM_COOLDOWN_MS = 2500;
   // A tab or app switch long enough to matter. Shorter blips (e.g. an
   // incidental focus change) are not worth resetting the watch for.
   const MIN_HIDDEN_MS = 1000;
