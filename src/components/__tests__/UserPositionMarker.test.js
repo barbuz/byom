@@ -2,6 +2,14 @@ import { describe, it, vi, beforeEach } from "vitest";
 import { render } from "@testing-library/svelte";
 import { flushPromises, getCtxCalls } from "../../../tests/setup.js";
 import UserPositionMarker from "../UserPositionMarker.svelte";
+import {
+  WATCHDOG_INTERVAL_MS,
+  STALE_AFTER_MS,
+  FIRST_FIX_TIMEOUT_MS,
+  REARM_COOLDOWN_MS,
+  MIN_HIDDEN_MS,
+  GEOLOCATION_OPTIONS,
+} from "../../lib/gps.js";
 import assert from "node:assert/strict";
 
 const SIM = {
@@ -55,12 +63,23 @@ describe("UserPositionMarker", () => {
     const first = firstWatcher();
     const entry = first[1];
     const options = entry.options;
-    const expectedOptions = {
-      enableHighAccuracy: true,
-      maximumAge: 5000,
-      timeout: 10000,
-    };
-    assert.deepEqual(options, expectedOptions);
+    assert.deepEqual(options, GEOLOCATION_OPTIONS);
+  });
+
+  it("keeps the watchdog timing constants mutually consistent", () => {
+    // A provider may take up to `timeout` ms to answer, and may hand back a
+    // cached fix up to `maximumAge` ms old. Both must resolve before the
+    // watchdog calls the watch stale, otherwise a slow-but-alive provider is
+    // torn down and re-armed in a loop.
+    assert.ok(GEOLOCATION_OPTIONS.timeout < STALE_AFTER_MS);
+    assert.ok(GEOLOCATION_OPTIONS.maximumAge < STALE_AFTER_MS);
+    // A fix delivered a tick after it arrives must still be fresh.
+    assert.ok(WATCHDOG_INTERVAL_MS < STALE_AFTER_MS);
+    assert.ok(WATCHDOG_INTERVAL_MS < FIRST_FIX_TIMEOUT_MS);
+    // The cooldown must not exceed the staleness window, or a genuinely stale
+    // watch would keep being reported stale without ever being rebuilt.
+    assert.ok(REARM_COOLDOWN_MS < STALE_AFTER_MS);
+    assert.ok(MIN_HIDDEN_MS > 0);
   });
 
   it("updates userPosition and calls scheduleRender when the watch fires", async () => {
@@ -244,7 +263,9 @@ describe("UserPositionMarker watchdog", () => {
     assert.equal(before.length, 1);
     assert.equal(component.positionStale, false);
 
-    vi.advanceTimersByTime(15000);
+    // Past FIRST_FIX_TIMEOUT_MS, and far enough to reach the next watchdog
+    // tick, so the watchdog observes the expired first-fix budget.
+    vi.advanceTimersByTime(FIRST_FIX_TIMEOUT_MS + WATCHDOG_INTERVAL_MS);
     await flushPromises();
 
     const after = watchIds();
@@ -259,9 +280,11 @@ describe("UserPositionMarker watchdog", () => {
     render(UserPositionMarker, { props: { scheduleRender } });
     const before = watchIds();
 
+    // One watchdog tick between fixes: shorter than STALE_AFTER_MS, so each
+    // fix arrives while the previous one is still fresh.
     for (let i = 0; i < 6; i++) {
       emitPosition({ latitude: 12.3, longitude: 45.6, accuracy: 8 });
-      vi.advanceTimersByTime(5000);
+      vi.advanceTimersByTime(WATCHDOG_INTERVAL_MS);
       await flushPromises();
     }
 
@@ -278,12 +301,14 @@ describe("UserPositionMarker watchdog", () => {
     await flushPromises();
     const before = watchIds();
 
-    vi.advanceTimersByTime(10000);
+    // Still within STALE_AFTER_MS of the fix, so no re-arm yet.
+    vi.advanceTimersByTime(WATCHDOG_INTERVAL_MS);
     await flushPromises();
     assert.deepEqual(watchIds(), before);
     assert.equal(component.positionStale, false);
 
-    vi.advanceTimersByTime(5000);
+    // Cross STALE_AFTER_MS: the fix is now stale and the watch is rebuilt.
+    vi.advanceTimersByTime(STALE_AFTER_MS);
     await flushPromises();
     const after = watchIds();
     assert.notEqual(after[0], before[0]);
@@ -296,7 +321,7 @@ describe("UserPositionMarker watchdog", () => {
     const result = render(UserPositionMarker, { props: { scheduleRender } });
     const component = result.component;
 
-    vi.advanceTimersByTime(15000);
+    vi.advanceTimersByTime(FIRST_FIX_TIMEOUT_MS + WATCHDOG_INTERVAL_MS);
     await flushPromises();
     assert.equal(component.positionStale, true);
 
@@ -322,7 +347,9 @@ describe("UserPositionMarker watchdog", () => {
 
     setVisibility("hidden");
     // Stand in for time spent in another app, the user's current workaround.
-    vi.advanceTimersByTime(4000);
+    // Just past MIN_HIDDEN_MS, but short enough that the watchdog's first-fix
+    // budget has not expired, so the re-arm can only come from the resume.
+    vi.advanceTimersByTime(MIN_HIDDEN_MS + 1);
     setVisibility("visible");
     await flushPromises();
 
@@ -405,7 +432,7 @@ describe("UserPositionMarker watchdog", () => {
     emitPosition({ latitude: 20, longitude: 10, accuracy: 5000 });
     await flushPromises();
 
-    vi.advanceTimersByTime(15000);
+    vi.advanceTimersByTime(STALE_AFTER_MS + WATCHDOG_INTERVAL_MS);
     await flushPromises();
     assert.equal(component.positionStale, true);
 
