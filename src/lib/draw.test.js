@@ -5,6 +5,7 @@ import {
   drawReferencePoints,
   drawUserMarker,
 } from './draw.js';
+import { calculateTransform } from './transforms.js';
 
 function fakeCtx() {
   return { calls: [], translate(...a) { this.calls.push(['translate', a]); }, rotate(...a) { this.calls.push(['rotate', a]); }, scale(...a) { this.calls.push(['scale', a]); }, arc(...a) { this.calls.push(['arc', a]); }, fill() { this.calls.push(['fill']); }, stroke() { this.calls.push(['stroke']); }, beginPath() { this.calls.push(['beginPath']); }, save() { this.calls.push(['save']); }, restore() { this.calls.push(['restore']); }, measureText(t) { this.calls.push(['measureText', t]); return { width: 30 }; }, fillRect(...a) { this.calls.push(['fillRect', a]); }, fillText(...a) { this.calls.push(['fillText', a]); }, set fillStyle(v) { this.fs = v; this.calls.push(['fillStyle', v]); }, get fillStyle() { return this.fs; }, set strokeStyle(v) { this.ss = v; this.calls.push(['strokeStyle', v]); }, get strokeStyle() { return this.ss; }, set lineWidth(v) { this.lw = v; }, get lineWidth() { return this.lw; }, set font(v) { this.fn = v; }, get font() { return this.fn; }, set textAlign(v) { this.ta = v; }, get textAlign() { return this.ta; }, set textBaseline(v) { this.tb = v; }, get textBaseline() { return this.tb; }, };
@@ -128,4 +129,27 @@ describe('drawUserMarker', () => {
     expect(ss[0][1]).toMatch(/^rgba\(175,\s*76,\s*80,\s*0\.4\)$/);
     expect(fs[0][1]).toMatch(/^rgba\(175,\s*76,\s*80,\s*0\.15\)$/);
    });
+
+  it('places the marker north of a lower point, i.e. toward smaller image y', () => {
+    // A north-up map: the top edge (v = 0) is north, the bottom (v = 1) south.
+    // A GPS fix at higher latitude must land at a smaller pixel y than a lower
+    // one. A y-flip in the transform or the drawing would invert this, so this
+    // is the regression guard for the image y-down convention.
+    const ctx = fakeCtx();
+    const geoTransform = calculateTransform([
+      { u: 0, v: 0, lon: 0, lat: 0.01 },
+      { u: 1, v: 1, lon: 0.01, lat: 0 },
+    ]);
+    const view = { scale: 1, rotation: 0, translateX: 0, translateY: 0 };
+
+    drawUserMarker(ctx, { longitude: 0.005, latitude: 0.0075, accuracy: null }, geoTransform, view, 100, 100);
+    const northY = ctx.calls.filter(c => c[0] === 'arc')[0][1][1];
+    ctx.calls.length = 0;
+    drawUserMarker(ctx, { longitude: 0.005, latitude: 0.0025, accuracy: null }, geoTransform, view, 100, 100);
+    const southY = ctx.calls.filter(c => c[0] === 'arc')[0][1][1];
+
+    expect(northY).toBeCloseTo(25, 6);
+    expect(southY).toBeCloseTo(75, 6);
+    expect(northY).toBeLessThan(southY);
+  });
 });

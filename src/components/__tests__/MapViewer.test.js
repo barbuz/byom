@@ -660,6 +660,41 @@ describe("MapViewer degenerate georeference", () => {
   });
 });
 
+describe("MapViewer mirrored map warning", () => {
+  // Three points for an affine fit. In a north-up map latitude falls as image v
+  // (downward) grows, so the "correct" set is orientation-preserving; the
+  // "mirrored" set flips one latitude, which a swapped/misplaced point yields.
+  const CORRECT = [
+    { id: 1, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -74.0, lat: 40.0, accuracy: null },
+    { id: 2, mapId: 1, u: 700 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -73.0, lat: 40.0, accuracy: null },
+    { id: 3, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 500 / IMAGE_DIVISOR, lon: -74.0, lat: 39.0, accuracy: null },
+  ];
+  const MIRRORED = CORRECT.map((point, index) =>
+    index === 2 ? { ...point, lat: 41.0 } : point);
+
+  it("warns that a reference point is likely misplaced when the fit mirrors", async () => {
+    getReferencePoints.mockResolvedValue(MIRRORED);
+    await mountViewer();
+    await sleep(30);
+
+    await screen.findByText(/Mirrored map: a reference point is likely misplaced/);
+    // The transform itself is still shown, not reported as unavailable.
+    assert.equal(screen.queryByText(/Georeference unavailable/), null);
+  });
+
+  it("does not warn for a correctly oriented map", async () => {
+    getReferencePoints.mockResolvedValue(CORRECT);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(screen.getByText(/Points \(3\)/));
+    await flushPromises();
+
+    assert.equal(screen.queryByText(/Mirrored map/), null);
+    await screen.findByText(/Affine transform/);
+  });
+});
+
 describe("MapViewer point editing", () => {
   // The component sizes the canvas to the viewport and fits the 800x600
   // image into it, so the first reference point is not at its raw pixel
