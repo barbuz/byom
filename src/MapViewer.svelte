@@ -1,7 +1,7 @@
 <script>
   import { untrack } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
-  import { calculateTransform, geoToUV, geoDistanceToUV, imageDivisor } from './lib/transforms.js';
+  import { calculateTransform, geoToUV, geoDistanceToUV, imageDivisor, transformIsMirrored } from './lib/transforms.js';
   import { screenToImage, getPointAtScreen, pinchZoomTransform, centerOnImagePoint } from './lib/viewport.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
@@ -870,6 +870,10 @@
   let canSavePoint = $derived(pendingReferencePoint && selectedLon !== null && selectedLat !== null);
   let needsMorePoints = $derived(referencePoints.length < 3);
   let canCenterOnUser = $derived(Boolean(userPositionMarker?.userPosition && geoTransform));
+  // A fitted map should not mirror; if it does, a reference point is almost
+  // certainly misplaced, so surface it as a likely error rather than rendering
+  // a silently reflected map.
+  let geoTransformMirrored = $derived(transformIsMirrored(geoTransform));
 </script>
 
 <div class="viewer-container">
@@ -964,6 +968,11 @@
             ✓ Homography transform ({referencePoints.length} points)
           {/if}
         </div>
+        {#if geoTransformMirrored}
+          <div class="transform-status transform-error">
+            ⚠️ Mirrored map: a reference point is likely misplaced
+          </div>
+        {/if}
       {/if}
     </div>
   {:else if !showingPoints}
@@ -971,6 +980,10 @@
       {#if geoTransformError}
         <div class="points-hint hint-error">
           ⚠️ Georeference unavailable: {geoTransformError}
+        </div>
+      {:else if geoTransformMirrored}
+        <div class="points-hint hint-error">
+          ⚠️ Mirrored map: a reference point is likely misplaced
         </div>
       {:else}
         <div class="points-hint">
@@ -1077,6 +1090,10 @@
               <span>{geoTransform?.type || 'None'}</span>
             </div>
             {#if geoTransform}
+              <div class="info-row">
+                <strong>Mirrored:</strong>
+                <span>{geoTransformMirrored ? '⚠️ Yes (check reference points)' : 'No'}</span>
+              </div>
               <div class="info-row">
                 <strong>Transform Data:</strong>
                 <pre>{JSON.stringify(geoTransform, null, 2)}</pre>

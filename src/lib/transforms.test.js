@@ -13,6 +13,8 @@ import {
   localMetersToLonLat,
   wrapLongitude,
   planeOrigin,
+  imageFramePoint,
+  transformIsMirrored,
 } from '../lib/transforms.js';
 
 const METERS_PER_DEG_LAT = 111320;
@@ -45,6 +47,16 @@ describe('imageDivisor', () => {
   });
 });
 
+describe('imageFramePoint', () => {
+  it('negates v so the canonical frame grows upward like metric north', () => {
+    expect(imageFramePoint(0.25, 0.75)).toEqual({ x: 0.25, y: -0.75 });
+    // v = 0 negates to -0, which toEqual does not treat as 0.
+    const origin = imageFramePoint(0, 0);
+    expect(origin.x).toBe(0);
+    expect(origin.y).toBeCloseTo(0, 12);
+  });
+});
+
 describe('computeSimilarityTransform', () => {
   it('fits scale, rotation and translation in a local metric plane', () => {
     // A 100x100 image, so D = 100 and the fractions are the pixels / 100. The
@@ -65,16 +77,16 @@ describe('computeSimilarityTransform', () => {
     expect(t.m[6]).toBe(0);
     expect(t.m[7]).toBe(0);
 
-    // Uniform scale is metres per fraction unit. The linear block sends u to
-    // +east and v to -north, because the image's y axis points down (canvas
-    // convention) while metric north points up on a north-up map. The map is
-    // therefore orientation-reversing, so the determinant is negative.
+    // Uniform scale is metres per fraction unit. In the canonical y-up frame
+    // the linear block is an orientation-preserving similarity (a rotation with
+    // no reflection), so u maps to +east and v maps to -north, and the
+    // determinant is positive. A correctly georeferenced map must not mirror.
     const scale = 2 * metersPerDegreeLon(20) / 1;
     expect(t.m[0]).toBeCloseTo(scale, 6);
     expect(t.m[1]).toBeCloseTo(0, 6);
     expect(t.m[3]).toBeCloseTo(0, 6);
-    expect(t.m[4]).toBeCloseTo(-scale, 6);
-    expect(t.m[0] * t.m[4] - t.m[1] * t.m[3]).toBeLessThan(0);
+    expect(t.m[4]).toBeCloseTo(scale, 6);
+    expect(t.m[0] * t.m[4] - t.m[1] * t.m[3]).toBeGreaterThan(0);
 
     // Reference points map exactly onto their fractional image coordinates.
     const a = geoToUV(refs[0].lon, refs[0].lat, t);
@@ -114,11 +126,13 @@ describe('computeSimilarityTransform', () => {
     ];
     const t = computeSimilarityTransform(refs);
 
-    // The linear block is metres-per-fraction-unit times the rotated y-flip.
+    // The linear block is metres-per-fraction-unit times the map rotation.
+    // The fit is orientation-preserving in the canonical y-up frame, so this
+    // is a plain rotation: m[0] = m[4] = s·cosθ, m[1] = -m[3] = -s·sinθ.
     expect(t.m[0]).toBeCloseTo(metersPerFraction * cos, 6);
-    expect(t.m[1]).toBeCloseTo(metersPerFraction * sin, 6);
+    expect(t.m[1]).toBeCloseTo(-metersPerFraction * sin, 6);
     expect(t.m[3]).toBeCloseTo(metersPerFraction * sin, 6);
-    expect(t.m[4]).toBeCloseTo(-metersPerFraction * cos, 6);
+    expect(t.m[4]).toBeCloseTo(metersPerFraction * cos, 6);
 
     for (const [x, y] of [[0, 0], [500, -400], [-900, 700], [123, -456]]) {
       const geo = fracToLonLat(x / divisor, y / divisor);
@@ -823,6 +837,54 @@ describe('calculateTransform', () => {
   });
 });
 
+describe('transformIsMirrored', () => {
+  // A north-up map: east grows with u, north shrinks with v. The ground truth
+  // is orientation-preserving in the canonical y-up frame.
+  const lon0 = 8;
+  const lat0 = 45;
+  const mPerDegLon = metersPerDegreeLon(lat0);
+  const northUp = (u, v) => ({
+    lon: lon0 + (1000 * u) / mPerDegLon,
+    lat: lat0 + (-1000 * v) / METERS_PER_DEG_LAT,
+  });
+  // A reflected correspondence: the ground plane is mirrored about the
+  // horizontal axis, which is what a swapped/misplaced reference point yields.
+  const mirror = (u, v) => ({
+    lon: lon0 + (1000 * u) / mPerDegLon,
+    lat: lat0 + (1000 * v) / METERS_PER_DEG_LAT,
+  });
+  const refs = (fn, n) => Array.from({ length: n }, (_, i) => {
+    const uv = [[0, 0], [1, 0], [1, 1], [0, 1]][i];
+    return { u: uv[0], v: uv[1], ...fn(...uv) };
+  });
+
+  it('reports a correctly georeferenced map as not mirrored, for every model', () => {
+    expect(transformIsMirrored(computeSimilarityTransform(refs(northUp, 2)))).toBe(false);
+    expect(transformIsMirrored(computeAffineTransform(refs(northUp, 3)))).toBe(false);
+    expect(transformIsMirrored(computeHomographyTransform(refs(northUp, 4)))).toBe(false);
+  });
+
+  it('detects a mirrored correspondence for the affine and homography fits', () => {
+    expect(transformIsMirrored(computeAffineTransform(refs(mirror, 3)))).toBe(true);
+    expect(transformIsMirrored(computeHomographyTransform(refs(mirror, 4)))).toBe(true);
+  });
+
+  it('treats two points as ambiguous: a similarity cannot distinguish a reflection', () => {
+    // With two points and four degrees of freedom, a reflection and a rotation
+    // both fit exactly, so a mirrored 2-point set is not reported. This is why
+    // the warning is only meaningful once a third point is added.
+    expect(transformIsMirrored(computeSimilarityTransform(refs(mirror, 2)))).toBe(false);
+  });
+
+  it('is false for a missing transform and for a non-finite determinant', () => {
+    expect(transformIsMirrored(null)).toBe(false);
+    expect(transformIsMirrored(undefined)).toBe(false);
+    expect(transformIsMirrored({})).toBe(false);
+    // A row of zeros has determinant 0, which is not a reflection.
+    expect(transformIsMirrored({ m: [0, 0, 0, 0, 0, 0, 0, 0, 1] })).toBe(false);
+  });
+});
+
 describe('computeAffineTransform collinearity', () => {
   it('throws for collinear image points', () => {
     const collinear = [
@@ -876,14 +938,15 @@ describe('uvToGeo and geoToUV error cases', () => {
   });
 
   it('throws when a point maps to infinity', () => {
-    // The image-space line 2u + v = 0 is the horizon, where w = 0.
+    // The canonical-frame line 2x + y = 0 is the horizon, where w = 0. With
+    // y = -v that is the image-space line 2u - v = 0, so (u, v) = (1, 2).
     const projective = {
       m: [1, 0, 0, 0, 1, 0, 2, 1, 0],
       type: 'homography',
       lon0: 0,
       lat0: 0,
     };
-    expect(() => uvToGeo(1, -2, projective)).toThrow('Transform is singular');
+    expect(() => uvToGeo(1, 2, projective)).toThrow('Transform is singular');
     // Its inverse is singular too, since this matrix is not invertible.
     expect(() => geoToUV(-2, 1, projective)).toThrow('Transform is singular');
   });

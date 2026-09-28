@@ -16,7 +16,20 @@
  * the image is square. It also keeps both coordinates within [0, 1] for any
  * aspect ratio, and separates metres-per-fraction from the image resolution.
  *
- * Matrix layout is row-major:
+ * Fitting and projection both use one canonical image frame, `x = u`,
+ * `y = -v`, so `y` grows upward like the metric `north` axis. Stored `v` is
+ * still y-down (canvas/screen convention); the flip happens here, once, at the
+ * transform boundary. This matters for orientation: the map image is an
+ * orientation-reversing view of the ground (its y axis points the other way),
+ * so fitting in the raw `(u, v)` frame would either mirror a similarity or push
+ * the reflection into the affine/homography coefficients, leaving no uniform
+ * way to tell a correct fit from a reflected one. In the canonical frame a
+ * correctly georeferenced map always has a positive determinant, and a negative
+ * one unambiguously means the correspondences are mirrored, which
+ * `transformIsMirrored` reports (see the docs on it).
+ *
+ * Matrix layout is row-major, mapping canonical image coordinates `(x, y)` to
+ * local east/north metres:
  *   [m0 m1 m2]
  *   [m3 m4 m5]
  *   [m6 m7 m8]
@@ -85,6 +98,66 @@ export function localMetersToLonLat(east, north, lon0, lat0) {
     lon: wrapLongitude(lon0 + east / metersPerDegreeLon(lat0)),
     lat: lat0 + north / METERS_PER_DEG_LAT,
   };
+}
+
+/**
+ * Map a stored fractional image coordinate to the canonical fitting frame:
+ * `x = u`, `y = -v`. Stored `v` grows downward (canvas convention), so
+ * negating it makes `y` grow upward, the same way as metric north. Doing this
+ * once at the transform boundary lets every model fit an orientation-preserving
+ * map and makes a mirrored correspondence detectable as a sign flip (see
+ * `transformIsMirrored`).
+ * @param {number} u - Fractional image x
+ * @param {number} v - Fractional image y (y-down)
+ * @returns {Object} {x, y} in the canonical y-up frame
+ */
+export function imageFramePoint(u, v) {
+  return { x: u, y: -v };
+}
+
+/**
+ * Inverse of imageFramePoint: recover the stored y-down fractions from a point
+ * in the canonical frame.
+ * @param {number} x
+ * @param {number} y
+ * @returns {Object} {u, v} with v y-down
+ */
+function imageFrameToUV(x, y) {
+  return { u: x, v: -y };
+}
+
+/**
+ * Determinant of a row-major 3x3 matrix, used to check orientation. For an
+ * affine or projective map of the plane it is the signed factor by which the
+ * transform scales oriented area.
+ * @param {Array<number>} m
+ * @returns {number}
+ */
+function matrixDeterminant(m) {
+  const [a, b, c, d, e, f, g, h, i] = m;
+  return a * (e * i - f * h) - b * (d * i - f * g) + c * (d * h - e * g);
+}
+
+/**
+ * Whether a fitted transform mirrors the map. Fits are made in the canonical
+ * y-up image frame (`x = u`, `y = -v`), where a correctly georeferenced map
+ * preserves orientation, so its linear block has a positive determinant. A
+ * negative determinant means the image-to-ground correspondence reverses
+ * orientation — a reflection — which almost always means at least one reference
+ * point has the wrong ground position (e.g. two points swapped, or a coordinate
+ * typed into the wrong field). Maps are not generally mirrored, so this is worth
+ * surfacing as a likely error rather than rendering silently.
+ *
+ * The projective denominator must keep a single sign over the map for
+ * orientation to be defined; a homography that folds the plane is degenerate,
+ * and `calculateTransform` does not produce one from well-separated points.
+ * @param {Object|null} transform - Transform object {m, type, lon0, lat0}
+ * @returns {boolean}
+ */
+export function transformIsMirrored(transform) {
+  if (!transform || !transform.m) return false;
+  const determinant = matrixDeterminant(transform.m);
+  return Number.isFinite(determinant) && determinant < 0;
 }
 
 /**
@@ -266,18 +339,12 @@ function assertFinitePoints(points) {
  * Compute similarity transform (2 points): uniform scale, rotation and
  * translation, fitted in the local metric plane about the midpoint.
  *
- * The fit uses the image plane in its native orientation, where `v` grows
- * downward (canvas/screen convention) while metric `north` grows upward. A
- * north-up map therefore has its image y-axis and its metric north-axis
- * pointing opposite ways, so the image-to-ground map is orientation-reversing
- * and its linear block has a negative determinant. Fitting an
- * orientation-preserving similarity in (u, v) silently mirrors the map: the
- * two reference points still land exactly (4 equations, 4 DOF), but every
- * other point is reflected about the reference line. Reflect `v` into an
- * `up = -v` axis before measuring the image angle, and apply the reflection in
- * the returned matrix, so the fit matches the convention the rest of the app
- * renders in. See `computeAffineTransform`, whose extra degrees of freedom
- * absorb the reflection implicitly.
+ * Fitted in the canonical y-up image frame (`x = u`, `y = -v`), so the map is
+ * represented by an ordinary orientation-preserving similarity: a north-up map
+ * has a positive determinant, and a reflected (mirrored) correspondence has a
+ * negative one. Fitting in the raw y-down `(u, v)` frame instead would mirror
+ * every point off the reference line, which is what
+ * `transformIsMirrored` and the module doc warn about.
  * @param {Array} referencePoints - [{u, v, lon, lat}, ...]
  * @returns {Object} Transform {m, type, lon0, lat0}
  */
@@ -293,32 +360,34 @@ export function computeSimilarityTransform(referencePoints) {
   const m1 = lonLatToLocalMeters(p1.lon, p1.lat, lon0, lat0);
   const m2 = lonLatToLocalMeters(p2.lon, p2.lat, lon0, lat0);
 
-  const du = p2.u - p1.u;
-  const dv = p2.v - p1.v;
+  const q1 = imageFramePoint(p1.u, p1.v);
+  const q2 = imageFramePoint(p2.u, p2.v);
+  const dxImage = q2.x - q1.x;
+  const dyImage = q2.y - q1.y;
   const dxMetric = m2.east - m1.east;
   const dyMetric = m2.north - m1.north;
 
-  const distanceImage = Math.hypot(du, dv);
+  const distanceImage = Math.hypot(dxImage, dyImage);
   const distanceMetric = Math.hypot(dxMetric, dyMetric);
   if (!(distanceImage > 0) || !(distanceMetric > 0)) {
     throw new Error('Reference points must be distinct');
   }
 
-  // Metres per fraction unit, and the rotation aligning the image to the
-  // metric plane. The image angle is measured against the upward axis `-v`.
+  // Metres per fraction unit, and the rotation aligning the canonical image
+  // frame (both axes up = north) with the metric plane.
   const scale = distanceMetric / distanceImage;
-  const rotation = Math.atan2(dyMetric, dxMetric) - Math.atan2(-dv, du);
+  const rotation = Math.atan2(dyMetric, dxMetric) - Math.atan2(dyImage, dxImage);
   const cos = Math.cos(rotation);
   const sin = Math.sin(rotation);
   const a = scale * cos;
   const b = scale * sin;
 
-  // east = a*u + b*v + tx, north = b*u - a*v + ty: a similarity composed with
-  // the image y-down reflection, so det = -(a^2 + b^2) < 0.
+  // east = a*x - b*y + tx, north = b*x + a*y + ty: an orientation-preserving
+  // similarity in the canonical frame, so det = a^2 + b^2 > 0.
   return {
     m: [
-      a, b, m1.east - (a * p1.u + b * p1.v),
-      b, -a, m1.north - (b * p1.u - a * p1.v),
+      a, -b, m1.east - (a * q1.x - b * q1.y),
+      b, a, m1.north - (b * q1.x + a * q1.y),
       0, 0, 1,
     ],
     type: 'similarity',
@@ -328,7 +397,9 @@ export function computeSimilarityTransform(referencePoints) {
 }
 
 /**
- * Compute affine transform (3 points), fitted in the local metric plane.
+ * Compute affine transform (3 points), fitted in the local metric plane using
+ * the canonical y-up image frame (`x = u`, `y = -v`), so a correct map has a
+ * positive determinant and a mirrored correspondence a negative one.
  * @param {Array} referencePoints - [{u, v, lon, lat}, ...]
  * @returns {Object} Transform {m, type, lon0, lat0}
  */
@@ -345,9 +416,10 @@ export function computeAffineTransform(referencePoints) {
 
   for (const point of used) {
     const { east, north } = lonLatToLocalMeters(point.lon, point.lat, lon0, lat0);
-    rows.push([point.u, point.v, 1, 0, 0, 0]);
+    const { x, y } = imageFramePoint(point.u, point.v);
+    rows.push([x, y, 1, 0, 0, 0]);
     values.push(east);
-    rows.push([0, 0, 0, point.u, point.v, 1]);
+    rows.push([0, 0, 0, x, y, 1]);
     values.push(north);
   }
 
@@ -363,7 +435,9 @@ export function computeAffineTransform(referencePoints) {
 
 /**
  * Compute a homography (4 points) by direct linear transform, fitted in the
- * local metric plane with the matrix normalized so m8 = 1.
+ * local metric plane with the matrix normalized so m8 = 1. Uses the canonical
+ * y-up image frame (`x = u`, `y = -v`), so a correct map has a positive
+ * determinant and a mirrored correspondence a negative one.
  *
  * Both planes are Hartley-normalized before the solve and the result is
  * denormalized afterwards, which keeps the DLT design matrix well conditioned
@@ -380,7 +454,7 @@ export function computeHomographyTransform(referencePoints) {
   assertFinitePoints(used);
   const { lon0, lat0 } = planeOrigin(used);
 
-  const imagePoints = used.map(({ u, v }) => ({ x: u, y: v }));
+  const imagePoints = used.map(({ u, v }) => imageFramePoint(u, v));
   const metricPoints = used.map((point) =>
     lonLatToLocalMeters(point.lon, point.lat, lon0, lat0)
   );
@@ -420,14 +494,16 @@ export function computeHomographyTransform(referencePoints) {
 }
 
 /**
- * Transform fractional image coordinates to geographic coordinates.
+ * Transform fractional image coordinates to geographic coordinates. The stored
+ * y-down fractions are flipped into the canonical frame before applying `m`.
  * @param {number} u - Fractional image x in [0, 1]
- * @param {number} v - Fractional image y in [0, 1]
+ * @param {number} v - Fractional image y in [0, 1] (y-down)
  * @param {Object} transform - Transform object {m, type, lon0, lat0}
  * @returns {Object} {lon, lat}
  */
 export function uvToGeo(u, v, transform) {
-  const local = applyMatrix(transform.m, u, v);
+  const { x, y } = imageFramePoint(u, v);
+  const local = applyMatrix(transform.m, x, y);
   if (!local) {
     throw new Error('Transform is singular');
   }
@@ -435,7 +511,8 @@ export function uvToGeo(u, v, transform) {
 }
 
 /**
- * Transform geographic coordinates to fractional image coordinates.
+ * Transform geographic coordinates to fractional image coordinates. The result
+ * is converted from the canonical frame back to the stored y-down fractions.
  * @param {number} lon
  * @param {number} lat
  * @param {Object} transform - Transform object {m, type, lon0, lat0}
@@ -451,7 +528,7 @@ export function geoToUV(lon, lat, transform) {
   if (!image) {
     throw new Error('Transform is singular');
   }
-  return { u: image.x, v: image.y };
+  return imageFrameToUV(image.x, image.y);
 }
 
 /**
