@@ -180,11 +180,13 @@ describe("UserPositionMarker", () => {
     const accuracyRadius = arcs[0][1][2];
     const markerOuter = arcs[1][1][2];
     assert.ok(accuracyRadius > 0.05);
-    assert.ok(accuracyRadius < markerOuter);
-    // The dot is a screen-space overlay, so at any zoom its radii stay 20 and 6
+    // The accuracy ring is a real ground distance (11 px for 1100 m on this
+    // 100 m/px map), so with the smaller dot it is now the larger of the two.
+    assert.ok(accuracyRadius > markerOuter);
+    // The dot is a screen-space overlay, so at any zoom its radii stay 6 and 2
     // CSS pixels even though this map is drawn at scale 2.
-    assert.equal(markerOuter, 20);
-    assert.equal(arcs[2][1][2], 6);
+    assert.equal(markerOuter, 6);
+    assert.equal(arcs[2][1][2], 2);
     const renderCalls = scheduleRender.mock.calls;
     assert.equal(renderCalls.length, 1);
   });
@@ -210,9 +212,9 @@ describe("UserPositionMarker", () => {
     });
     const arcsCount = arcs.length;
     assert.equal(arcsCount, 2);
-    const markerRadius = arcs[1][1][2];
-    assert.ok(markerRadius >5);
-    assert.ok(markerRadius <8);
+    // Outer dot then inner dot; both keep their CSS-pixel radii at any zoom.
+    assert.equal(arcs[0][1][2], 6);
+    assert.equal(arcs[1][1][2], 2);
   });
 });
 function watchIds() {
