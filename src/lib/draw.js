@@ -3,9 +3,9 @@ import { geoToUV, geoDistanceToUV, imageDivisor } from './transforms.js';
 // The user marker is a screen-space overlay: its radius is in CSS pixels and
 // must not grow with the map. The accuracy ring, however, is a ground distance
 // and does scale with the map.
-const USER_MARKER_RADIUS = 20;
-const USER_MARKER_INNER_RADIUS = 6;
-const STALE_MARKER_RADIUS = 20;
+const USER_MARKER_RADIUS = 6;
+const USER_MARKER_INNER_RADIUS = 2;
+const STALE_MARKER_RADIUS = 6;
 
 // Scale the current transform about a fixed point, so a marker drawn afterwards
 // stays centered while its radius changes in screen space. Expressed as one
