@@ -181,7 +181,10 @@ describe("UserPositionMarker", () => {
     const markerOuter = arcs[1][1][2];
     assert.ok(accuracyRadius > 0.05);
     assert.ok(accuracyRadius < markerOuter);
-    assert.ok(markerOuter > arcs[2][1][2]);
+    // The dot is a screen-space overlay, so at any zoom its radii stay 20 and 6
+    // CSS pixels even though this map is drawn at scale 2.
+    assert.equal(markerOuter, 20);
+    assert.equal(arcs[2][1][2], 6);
     const renderCalls = scheduleRender.mock.calls;
     assert.equal(renderCalls.length, 1);
   });

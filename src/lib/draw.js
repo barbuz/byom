@@ -1,5 +1,19 @@
 import { geoToUV, geoDistanceToUV, imageDivisor } from './transforms.js';
 
+// The user marker is a screen-space overlay: its radius is in CSS pixels and
+// must not grow with the map. The accuracy ring, however, is a ground distance
+// and does scale with the map.
+const USER_MARKER_RADIUS = 20;
+const USER_MARKER_INNER_RADIUS = 6;
+const STALE_MARKER_RADIUS = 20;
+
+// Scale the current transform about a fixed point, so a marker drawn afterwards
+// stays centered while its radius changes in screen space. Expressed as one
+// matrix so it does not perturb the transform stack's translate calls.
+function scaleAbout(ctx, x, y, factor) {
+  ctx.transform(factor, 0, 0, factor, x * (1 - factor), y * (1 - factor));
+}
+
 export function applyImageTransform(ctx, transform, imageWidth, imageHeight) {
   ctx.translate(transform.translateX, transform.translateY);
   ctx.rotate(transform.rotation);
@@ -100,18 +114,23 @@ export function drawUserMarker(ctx, position, geoTransform, transform, imageWidt
     const y = uv.v * divisor;
 
     ctx.save();
+    // Place the marker in image space, then cancel the map scale about the
+    // marker center so the dot itself keeps a constant screen size at any zoom.
+    // The accuracy ring is drawn before that cancellation because it represents
+    // real ground coverage and must shrink and grow with the map.
     applyImageTransform(ctx, transform, imageWidth, imageHeight);
 
     // A stale fix is a frozen coordinate whose reported accuracy has ceased to
     // mean anything; drawing its ballooning ring would imply a precision we do
     // not have. Show a hollow, dashed marker instead.
     if (stale) {
+      scaleAbout(ctx, x, y, 1 / transform.scale);
       ctx.strokeStyle = 'rgba(175, 76, 80, 0.8)';
-      ctx.fillStyle =	'rgba(175, 76, 80, 0.15)';
-      ctx.lineWidth =	3;
+      ctx.fillStyle = 'rgba(175, 76, 80, 0.15)';
+      ctx.lineWidth = 3;
       ctx.setLineDash([6, 6]);
       ctx.beginPath();
-      ctx.arc(x, y, 20, 0, Math.PI * 2);
+      ctx.arc(x, y, STALE_MARKER_RADIUS, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       ctx.setLineDash([]);
@@ -120,32 +139,33 @@ export function drawUserMarker(ctx, position, geoTransform, transform, imageWidt
     }
 
     if (position.accuracy) {
-      const accuracyInPixels =	geoDistanceToUV(position.longitude, position.latitude, position.accuracy, geoTransform) * divisor;
+      const accuracyInPixels = geoDistanceToUV(position.longitude, position.latitude, position.accuracy, geoTransform) * divisor;
 
-      ctx.strokeStyle =	'rgba(175, 76, 80, 0.4)';
-      ctx.fillStyle =	'rgba(175, 76, 80, 0.15)';
-      ctx.lineWidth =	2;
+      ctx.strokeStyle = 'rgba(175, 76, 80, 0.4)';
+      ctx.fillStyle = 'rgba(175, 76, 80, 0.15)';
+      ctx.lineWidth = 2;
       ctx.beginPath();
-      ctx.arc(x, y, accuracyInPixels,	0, Math.PI *	 2);
-       ctx.fill();
-       ctx.stroke();
+      ctx.arc(x, y, accuracyInPixels, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
     }
 
-    ctx.fillStyle =	'#AF4C50';
+    scaleAbout(ctx, x, y, 1 / transform.scale);
+    ctx.fillStyle = '#AF4C50';
     ctx.beginPath();
-    ctx.arc(x, y,	 20,	0, Math.PI *	 2);
+    ctx.arc(x, y, USER_MARKER_RADIUS, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle =	'white';
-    ctx.lineWidth =	3;
+    ctx.strokeStyle = 'white';
+    ctx.lineWidth = 3;
     ctx.stroke();
 
-    ctx.fillStyle =	'white';
+    ctx.fillStyle = 'white';
     ctx.beginPath();
-    ctx.arc(x, y,	 6,	0, Math.PI *	 2);
+    ctx.arc(x, y, USER_MARKER_INNER_RADIUS, 0, Math.PI * 2);
     ctx.fill();
 
     ctx.restore();
-   } catch (error) {
+  } catch (error) {
     console.error('Error drawing user position:', error);
-   }
+  }
 }
