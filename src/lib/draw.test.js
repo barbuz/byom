@@ -170,8 +170,8 @@ describe('drawUserMarker', () => {
 
     // The outer dot and inner dot radii must not change with the map scale,
     // unlike the accuracy ring which is a real ground distance.
-    expect(radiiAt(1)).toEqual([20, 6]);
-    expect(radiiAt(4)).toEqual([20, 6]);
+    expect(radiiAt(1)).toEqual([6, 2]);
+    expect(radiiAt(4)).toEqual([6, 2]);
   });
 
   it('keeps the stale marker a constant screen size at any zoom', () => {
@@ -190,8 +190,8 @@ describe('drawUserMarker', () => {
       return ctx.calls.filter(c => c[0] === 'arc')[0][1][2];
     };
 
-    expect(radiusAt(1)).toBe(20);
-    expect(radiusAt(4)).toBe(20);
+    expect(radiusAt(1)).toBe(6);
+    expect(radiusAt(4)).toBe(6);
   });
 
   it('draws the marker at the correct screen point under rotation and zoom', () => {
