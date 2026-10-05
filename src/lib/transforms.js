@@ -165,7 +165,7 @@ export function transformIsMirrored(transform) {
  * @param {Array<number>} m
  * @returns {Array<number>|null} Inverse, or null when singular.
  */
-function invertMatrix(m) {
+export function invertMatrix(m) {
   const [a, b, c, d, e, f, g, h, i] = m;
   const c11 = e * i - f * h;
   const c12 = -(d * i - f * g);

@@ -178,204 +178,130 @@ describe('IndexedDB wrapper — cascade delete', () => {
   });
 });
 
-describe('IndexedDB wrapper — legacy point migration', () => {
-  // A 400x300 image, so D = max(400, 300) = 400. Legacy pixel coordinates
-  // differ from the resulting fractions by exactly that divisor.
-  const WIDTH = 400;
-  const HEIGHT = 300;
-  const DIVISOR = 400;
+describe('IndexedDB wrapper — bulk reference points', () => {
+  it('returns every reference point across all maps', async () => {
+    const mapA = await db.addMap({ name: 'A', imageBlob: 'a', thumbnail: null });
+    const mapB = await db.addMap({ name: 'B', imageBlob: 'b', thumbnail: null });
+    await db.addReferencePoint({ mapId: mapA, u: 0.1, v: 0.1, lon: 1, lat: 1 });
+    await db.addReferencePoint({ mapId: mapB, u: 0.2, v: 0.2, lon: 2, lat: 2 });
 
-  // Legacy rows used imageX/imageY, so they are written straight into the
-  // store rather than through addReferencePoint, which only speaks u/v.
-  async function addLegacyMap(name, points, size = { width: WIDTH, height: HEIGHT }) {
-    const mapId = await db.addMap({ name, imageBlob: { size: `${name}-blob` }, thumbnail: null });
-    await new Promise((resolve, reject) => {
-      const tx = conn.transaction(['referencePoints'], 'readwrite');
-      const store = tx.objectStore('referencePoints');
-      for (const point of points) store.add({ mapId, ...point });
-      tx.oncomplete = () => resolve();
-      tx.onerror = () => reject(tx.error);
-    });
-    stubImageSize(size.width, size.height);
-    return mapId;
+    const all = await db.getAllReferencePoints();
+    expect(all).toHaveLength(2);
+    expect(all.map((point) => point.mapId).sort()).toEqual([mapA, mapB]);
+  });
+
+  it('returns an empty list when there are no points', async () => {
+    expect(await db.getAllReferencePoints()).toEqual([]);
+  });
+});
+
+describe('IndexedDB wrapper — image dimension backfill', () => {
+  function stubDecode(width, height) {
+    return vi.fn(async () => ({ width, height, close: vi.fn() }));
   }
 
-  it('isLegacyPoints flags legacy imageX/imageY rows and out-of-range values', () => {
-    expect(db.isLegacyPoints([])).toBe(false);
-    expect(db.isLegacyPoints([{ u: 0.5, v: 0.5 }])).toBe(false);
-    // Exactly 1.0 is a legal fraction (a click on the far edge), not a pixel.
-    expect(db.isLegacyPoints([{ u: 1.0, v: 1.0 }])).toBe(false);
-    expect(db.isLegacyPoints([{ u: 0.5, v: 1.0 }])).toBe(false);
-
-    // The real v1 shape: the pixel fields themselves are conclusive.
-    expect(db.isLegacyPoints([{ imageX: 10, imageY: 20, u: 0.1, v: 0.2 }])).toBe(true);
-    expect(db.isLegacyPoints([{ imageX: 0, imageY: 0 }])).toBe(true);
-    // A pixel coordinate under the new names is caught by the range test.
-    expect(db.isLegacyPoints([{ u: 1.0000001, v: 0.5 }])).toBe(true);
-    expect(db.isLegacyPoints([{ u: 0.5, v: 200 }])).toBe(true);
-    // The judgement is per map: one legacy row flags the whole set.
-    expect(db.isLegacyPoints([{ u: 0.25, v: 0.25 }, { imageX: 100, imageY: 50 }])).toBe(true);
+  it('persists image dimensions supplied to addMap', async () => {
+    const id = await db.addMap({
+      name: 'Sized',
+      imageBlob: 'blob',
+      thumbnail: null,
+      imageWidth: 800,
+      imageHeight: 600,
+    });
+    const map = await db.getMap(id);
+    expect(map.imageWidth).toBe(800);
+    expect(map.imageHeight).toBe(600);
   });
 
-  it('converts legacy pixel points to fractions with the single max divisor', async () => {
-    const mapId = await addLegacyMap('Legacy', [
-      { imageX: 100, imageY: 60, lon: -74.0, lat: 40.0 },
-      { imageX: 300, imageY: 240, lon: -73.0, lat: 41.0 },
-    ]);
-
-    await db.migrateLegacyPoints();
-
-    const points = await db.getReferencePoints(mapId);
-    const byLon = [...points].sort((a, b) => a.lon - b.lon);
-    expect(byLon[0].u).toBeCloseTo(100 / DIVISOR, 12);
-    expect(byLon[0].v).toBeCloseTo(60 / DIVISOR, 12);
-    expect(byLon[1].u).toBeCloseTo(300 / DIVISOR, 12);
-    expect(byLon[1].v).toBeCloseTo(240 / DIVISOR, 12);
-    // The other fields are preserved, and the legacy fields are gone so the
-    // map cannot be re-flagged on the next boot.
-    expect(byLon[0].lon).toBe(-74.0);
-    expect(byLon[0].lat).toBe(40.0);
-    expect(byLon[0].mapId).toBe(mapId);
-    expect(byLon[0].imageX).toBeUndefined();
-    expect(byLon[0].imageY).toBeUndefined();
+  it('records null dimensions for a map added without them', async () => {
+    const id = await db.addMap({ name: 'Unsized', imageBlob: 'blob', thumbnail: null });
+    const map = await db.getMap(id);
+    expect(map.imageWidth).toBeNull();
+    expect(map.imageHeight).toBeNull();
   });
 
-  it('resolves a v1 fixture to the same geo positions after the sweep', async () => {
-    // Round-trip: fit a transform from the legacy pixel points, remember where
-    // an arbitrary pixel resolves, then confirm the migrated fractions resolve
-    // to the same place. The fit input space changes, so this is the check
-    // that the migration preserves the georeference.
-    const { calculateTransform, uvToGeo } = await import('./transforms.js');
-    const pixelRefs = [
-      { imageX: 0, imageY: 0, lon: 8.0, lat: 45.0 },
-      { imageX: 1000, imageY: 0, lon: 8.02, lat: 45.0 },
-      { imageX: 1000, imageY: 800, lon: 8.03, lat: 45.01 },
-      { imageX: 0, imageY: 1000, lon: 8.0, lat: 45.02 },
-    ];
-    const before = calculateTransform(pixelRefs.map(({ imageX, imageY, ...rest }) => ({ u: imageX, v: imageY, ...rest })));
-    const expected = uvToGeo(625, 375, before);
+  it('fills missing dimensions and is idempotent', async () => {
+    const id = await db.addMap({ name: 'A', imageBlob: 'a', thumbnail: null });
+    const decode = stubDecode(800, 600);
+    vi.stubGlobal('createImageBitmap', decode);
 
-    const mapId = await addLegacyMap('V1', pixelRefs.map((p) => ({ ...p })), { width: 1000, height: 1000 });
-    await db.migrateLegacyPoints();
+    await db.backfillImageDimensions();
 
-    const migrated = await db.getReferencePoints(mapId);
-    const after = calculateTransform(migrated);
-    const actual = uvToGeo(625 / 1000, 375 / 1000, after);
-    expect(actual.lon).toBeCloseTo(expected.lon, 9);
-    expect(actual.lat).toBeCloseTo(expected.lat, 9);
+    const map = await db.getMap(id);
+    expect(map.imageWidth).toBe(800);
+    expect(map.imageHeight).toBe(600);
+    expect(decode).toHaveBeenCalledTimes(1);
+
+    // A second run finds nothing to fill, so it decodes nothing.
+    await db.backfillImageDimensions();
+    expect(decode).toHaveBeenCalledTimes(1);
   });
 
-  it('is a no-op on an already-fractional database and is idempotent', async () => {
-    const mapId = await addLegacyMap('Legacy', [
-      { u: 100, v: 60, lon: -74.0, lat: 40.0 },
-      { u: 300, v: 240, lon: -73.0, lat: 41.0 },
-    ]);
-    const fractionalMapId = await db.addMap({ name: 'Modern', imageBlob: 'blob', thumbnail: null });
-    await db.addReferencePoint({ mapId: fractionalMapId, u: 0.25, v: 0.5, lon: 1, lat: 2 });
+  it('does not decode a map that already carries dimensions', async () => {
+    await db.addMap({
+      name: 'Sized',
+      imageBlob: 'a',
+      thumbnail: null,
+      imageWidth: 10,
+      imageHeight: 10,
+    });
+    const decode = vi.fn();
+    vi.stubGlobal('createImageBitmap', decode);
 
-    await db.migrateLegacyPoints();
-    const first = await db.getReferencePoints(mapId);
-    const modern = await db.getReferencePoints(fractionalMapId);
-
-    // A second sweep finds nothing left to convert: no double division.
-    await db.migrateLegacyPoints();
-    const second = await db.getReferencePoints(mapId);
-
-    expect(second).toEqual(first);
-    // The already-fractional map is untouched.
-    expect(modern[0].u).toBe(0.25);
-    expect(modern[0].v).toBe(0.5);
+    await db.backfillImageDimensions();
+    expect(decode).not.toHaveBeenCalled();
   });
 
-  it('commits a map atomically so a retry can never divide it twice', async () => {
-    const mapId = await addLegacyMap('Legacy', [
-      { imageX: 100, imageY: 60, lon: -74.0, lat: 40.0 },
-      { imageX: 300, imageY: 240, lon: -73.0, lat: 41.0 },
-    ]);
-
-    // Overlapping calls collapse onto the module-level guard, like two effects
-    // re-running in one tab.
-    await Promise.all([db.migrateLegacyPoints(), db.migrateLegacyPoints()]);
-
-    const points = await db.getReferencePoints(mapId);
-    const byLon = [...points].sort((a, b) => a.lon - b.lon);
-    expect(byLon[0].u).toBeCloseTo(100 / DIVISOR, 12);
-    expect(byLon[0].v).toBeCloseTo(60 / DIVISOR, 12);
-    // After a committed sweep nothing is left flagged, so a later pass (another
-    // tab, a crash retry) reads fractions and writes nothing. A half-written
-    // map would still flag here and be divided a second time.
-    expect(db.isLegacyPoints(points)).toBe(false);
-  });
-
-  it('skips a map whose blob fails to decode without aborting the sweep', async () => {
+  it('skips a blob that fails to decode and retries it next boot', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-
-    // First map's blob decodes; second map's does not.
-    const decodableId = await db.addMap({ name: 'Good', imageBlob: 'good', thumbnail: null });
-    await db.addReferencePoint({ mapId: decodableId, u: 100, v: 60, lon: -74.0, lat: 40.0 });
+    const goodId = await db.addMap({ name: 'Good', imageBlob: 'good', thumbnail: null });
     const brokenId = await db.addMap({ name: 'Broken', imageBlob: 'broken', thumbnail: null });
-    await db.addReferencePoint({ mapId: brokenId, u: 200, v: 120, lon: -73.0, lat: 41.0 });
 
     vi.stubGlobal('createImageBitmap', vi.fn(async (blob) => {
       if (blob === 'broken') throw new Error('bad image');
-      return { width: WIDTH, height: HEIGHT, close: vi.fn() };
+      return { width: 400, height: 300, close: vi.fn() };
     }));
 
-    await db.migrateLegacyPoints();
+    await db.backfillImageDimensions();
 
-    // The decodable map converted...
-    const good = await db.getReferencePoints(decodableId);
-    expect(good[0].u).toBeCloseTo(100 / DIVISOR, 12);
-    // ...and the broken one was left as pixels so it re-flags next boot.
-    const broken = await db.getReferencePoints(brokenId);
-    expect(broken[0].u).toBe(200);
+    expect((await db.getMap(goodId)).imageWidth).toBe(400);
+    // The broken map is left un-backfilled so the next boot retries it.
+    expect((await db.getMap(brokenId)).imageWidth).toBeNull();
     expect(warnSpy).toHaveBeenCalled();
+
+    // Next boot: a fresh module run sees the blob now decodes and fills it in.
+    conn.close();
+    vi.resetModules();
+    db = await import('./db.js');
+    conn = await db.initDB();
+    vi.stubGlobal('createImageBitmap', stubDecode(400, 300));
+
+    await db.backfillImageDimensions();
+    expect((await db.getMap(brokenId)).imageWidth).toBe(400);
     warnSpy.mockRestore();
   });
 
-  it('leaves a map with no points alone without decoding its blob', async () => {
-    await db.addMap({ name: 'Empty', imageBlob: 'empty', thumbnail: null });
-    const bitmap = vi.fn();
-    vi.stubGlobal('createImageBitmap', bitmap);
-
-    await db.migrateLegacyPoints();
-    expect(bitmap).not.toHaveBeenCalled();
-  });
-
-  it('skips a map whose image reports no usable dimensions', async () => {
-    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
-    const mapId = await addLegacyMap('Zero', [
-      { imageX: 100, imageY: 60, lon: -74.0, lat: 40.0 },
-    ], { width: 0, height: 0 });
-
-    await db.migrateLegacyPoints();
-
-    const points = await db.getReferencePoints(mapId);
-    expect(points[0].imageX).toBe(100);
-    expect(warnSpy).toHaveBeenCalled();
-    warnSpy.mockRestore();
-  });
-
-  it('swallows a sweeping failure so a broken pass never poisons app startup', async () => {
+  it('swallows a backfill failure so a broken pass never poisons startup', async () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    await addLegacyMap('Legacy', [{ imageX: 100, imageY: 60, lon: -74.0, lat: 40.0 }]);
+    await db.addMap({ name: 'A', imageBlob: 'a', thumbnail: null });
+    vi.stubGlobal('createImageBitmap', stubDecode(10, 10));
 
-    // Force the conversion transaction open to throw.
+    // Force the write transaction open to throw.
     const originalTransaction = conn.transaction.bind(conn);
     conn.transaction = () => {
       throw new Error('database is closing');
     };
 
-    await expect(db.migrateLegacyPoints()).resolves.toBeUndefined();
+    await expect(db.backfillImageDimensions()).resolves.toBeUndefined();
     expect(errorSpy).toHaveBeenCalled();
 
     conn.transaction = originalTransaction;
     errorSpy.mockRestore();
   });
 
-  it('does not bump DB_VERSION for the migration', () => {
-    // The fractional schema is a meaning change to existing fields, not a
-    // structural one, so there is nothing for onupgradeneeded to do.
+  it('does not bump DB_VERSION for the backfill', () => {
+    // Dimensions are an additive field, not a structural change, so there is
+    // nothing for onupgradeneeded to do.
     expect(conn.version).toBe(1);
   });
 });

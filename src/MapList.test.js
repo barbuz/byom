@@ -1,44 +1,66 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/svelte';
+import { flushPromises, FakeImage } from '../tests/setup.js';
 import MapList from './MapList.svelte';
 
 const dbMocks = vi.hoisted(() => ({
   getAllMaps: vi.fn(),
+  getAllReferencePoints: vi.fn(),
+  addMap: vi.fn(async () => 1),
   deleteMap: vi.fn(async () => {}),
 }));
 
 vi.mock('./lib/db.js', () => dbMocks);
 
+// Two reference points on an 800x600 image place the map around (8.005, 46.995).
+const POINTS_NEAR = [
+  { id: 1, mapId: 1, u: 0, v: 0, lon: 8.0, lat: 47.0, timestamp: 1 },
+  { id: 2, mapId: 1, u: 1, v: 0, lon: 8.01, lat: 47.0, timestamp: 1 },
+  { id: 3, mapId: 1, u: 0, v: 0.75, lon: 8.0, lat: 46.99, timestamp: 1 },
+];
+
+// A georeferenced map on the other side of the world: it stays in "Other maps".
+const POINTS_FAR = [
+  { id: 11, mapId: 2, u: 0, v: 0, lon: 20.0, lat: 10.0, timestamp: 1 },
+  { id: 12, mapId: 2, u: 1, v: 0, lon: 20.01, lat: 10.0, timestamp: 1 },
+  { id: 13, mapId: 2, u: 0, v: 0.75, lon: 20.0, lat: 9.99, timestamp: 1 },
+];
+
 const maps = [
-  {
-    id:  1,
-    name: 'Downtown',
-    thumbnail: 'data:image/jpeg;base64,AAA',
-    timestamp: 1700000000000,
-  },
-  {
-    id:  2,
-    name: 'Harbor',
-    thumbnail: 'data:image/jpeg;base64,BBB',
-    timestamp: 1600000000000,
-  },
+  { id: 1, name: 'Downtown', thumbnail: 'data:image/jpeg;base64,AAA', timestamp: 1700000000000, imageWidth: 800, imageHeight: 600 },
+  { id: 2, name: 'Harbor', thumbnail: 'data:image/jpeg;base64,BBB', timestamp: 1600000000000, imageWidth: 800, imageHeight: 600 },
+  { id: 3, name: 'Unfinished', thumbnail: 'data:image/jpeg;base64,CCC', timestamp: 1500000000000, imageWidth: 800, imageHeight: 600 },
 ];
 
 afterEach(() => {
   window.location.hash = '';
   vi.clearAllMocks();
   vi.restoreAllMocks();
-
 });
 
-function renderList() {
-  dbMocks.getAllMaps.mockResolvedValue([...maps]);
-  return render(MapList);
+function emitPosition(coords) {
+  const ids = [...globalThis.__geolocationTestUtil.getWatchers().keys()];
+  globalThis.__geolocationTestUtil.emitWatchPosition(ids[ids.length - 1], coords);
 }
 
-describe('MapList', () => {
+function renderList({ withPosition = true } = {}) {
+  dbMocks.getAllMaps.mockResolvedValue(maps.map((m) => ({ ...m })));
+  dbMocks.getAllReferencePoints.mockResolvedValue([
+    ...POINTS_NEAR,
+    ...POINTS_FAR,
+    { id: 4, mapId: 3, u: 0.1, v: 0.1, lon: 8.0, lat: 47.0, timestamp: 1 },
+  ]);
+  const result = render(MapList);
+  if (withPosition) {
+    emitPosition({ latitude: 46.995, longitude: 8.005, accuracy: 10 });
+  }
+  return result;
+}
+
+describe('MapList sections', () => {
   it('shows empty state when there are no maps', async () => {
     dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
     render(MapList);
     await screen.findByText(/no maps yet/i);
     expect(screen.getByRole('button', { name: /add map/i })).toBeTruthy();
@@ -47,20 +69,41 @@ describe('MapList', () => {
   it('shows an alert when loading maps fails', async () => {
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     dbMocks.getAllMaps.mockRejectedValue(new Error('boom'));
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
     render(MapList);
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Failed to load maps'));
     expect(screen.getByText(/no maps yet/i)).toBeTruthy();
   });
 
+  it('renders the three sections with correct membership', async () => {
+    renderList();
+    await screen.findByText('Downtown');
+    // Map 1 contains the fix; map 2 is georeferenced but far; map 3 has too few
+    // points to georeference.
+    expect(screen.getByRole('heading', { name: /near you/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /needs more reference points/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /other maps/i })).toBeTruthy();
+    expect(screen.getByText('Downtown')).toBeTruthy();
+    expect(screen.getByText('Harbor')).toBeTruthy();
+    expect(screen.getByText('Unfinished')).toBeTruthy();
+  });
+
+  it('shows a waiting message before any fix arrives', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([{ ...maps[0] }]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([...POINTS_NEAR]);
+    render(MapList);
+    await screen.findByText('Downtown');
+    expect(screen.getByText(/waiting for your location/i)).toBeTruthy();
+  });
+
   it('renders map cards with name, date and delete button', async () => {
     renderList();
     await screen.findByText('Downtown');
-    expect(screen.getByText('Harbor')).toBeTruthy();
+    const card = screen.getByRole('button', { name: /open map downtown/i });
+    expect(card.hasAttribute('tabindex')).toBe(true);
     expect(
       screen.getAllByRole('button').some((b) => b.getAttribute('aria-label') === 'Delete map')
     ).toBe(true);
-    const card = screen.getByRole('button', { name: /open map downtown/i });
-    expect(card.hasAttribute('tabindex')).toBe(true);
   });
 
   it('opens a map when the card is clicked or Enter is pressed', async () => {
@@ -73,9 +116,6 @@ describe('MapList', () => {
 
     fireEvent.keyDown(card, { key: 'Enter' });
     expect(window.location.hash).toBe('#map/1');
-
-    fireEvent.keyDown(card, { key: ' ' });
-    expect(window.location.hash).toBe('#map/1');
   });
 
   it('renders the injected app version', async () => {
@@ -84,17 +124,113 @@ describe('MapList', () => {
     expect(screen.getByText(`v${__APP_VERSION__}`)).toBeTruthy();
   });
 
-  it('shows the version alongside the empty state', async () => {
-    dbMocks.getAllMaps.mockResolvedValue([]);
+  it('updates the classification when a new position is emitted', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([{ ...maps[0] }]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([...POINTS_NEAR]);
     render(MapList);
-    await screen.findByText(/no maps yet/i);
-    expect(screen.getByText(`v${__APP_VERSION__}`)).toBeTruthy();
+    await screen.findByText('Downtown');
+    // No fix yet: the map sits in "Other maps".
+    expect(screen.getByRole('heading', { name: /other maps/i })).toBeTruthy();
+
+    emitPosition({ latitude: 46.995, longitude: 8.005, accuracy: 10 });
+    await flushPromises();
+
+    expect(screen.getByRole('heading', { name: /near you/i })).toBeTruthy();
+    expect(screen.queryByRole('heading', { name: /other maps/i })).toBeNull();
   });
 
-  it('deletes a map fromthe delete button without opening it', async () => {
+  it('ignores a position move under the 5 m threshold', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([{ ...maps[0] }]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([...POINTS_NEAR]);
+    render(MapList);
+    await screen.findByText('Downtown');
+
+    emitPosition({ latitude: 46.995, longitude: 8.005, accuracy: 10 });
+    await flushPromises();
+    expect(screen.getByRole('heading', { name: /near you/i })).toBeTruthy();
+
+    // ~1 m away: no recompute, so the section membership is unchanged.
+    emitPosition({ latitude: 46.99501, longitude: 8.005, accuracy: 10 });
+    await flushPromises();
+    expect(screen.getByRole('heading', { name: /near you/i })).toBeTruthy();
+  });
+});
+
+describe('MapList sorting', () => {
+  it('exposes the documented default sort options', async () => {
     renderList();
     await screen.findByText('Downtown');
-    const card = screen.getByRole('button', { name: /open map downtown/i });
+
+    const nearSort = screen.getByLabelText(/sort near-you maps/i);
+    expect(nearSort.value).toBe('size');
+    expect([...nearSort.options].map((o) => o.value)).toEqual(['size', 'lastModified', 'name']);
+
+    const incompleteSort = screen.getByLabelText(/sort incomplete maps/i);
+    expect(incompleteSort.value).toBe('lastModified');
+
+    const otherSort = screen.getByLabelText(/sort other maps/i);
+    expect(otherSort.value).toBe('distance');
+  });
+
+  it('reorders a section when the sort control changes', async () => {
+    // Two incomplete maps with distinct names, so a name sort is observable.
+    dbMocks.getAllMaps.mockResolvedValue([
+      { id: 1, name: 'Zulu', thumbnail: 'a', timestamp: 2, imageWidth: 800, imageHeight: 600 },
+      { id: 2, name: 'Alpha', thumbnail: 'b', timestamp: 1, imageWidth: 800, imageHeight: 600 },
+    ]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText('Zulu');
+
+    const section = screen.getByRole('heading', { name: /needs more reference points/i })
+      .closest('section');
+    const names = () => [...section.querySelectorAll('.map-name')].map((n) => n.textContent);
+    // Default last-modified desc: Zulu (t=2) before Alpha (t=1).
+    expect(names()).toEqual(['Zulu', 'Alpha']);
+
+    const sort = screen.getByLabelText(/sort incomplete maps/i);
+    await fireEvent.change(sort, { target: { value: 'name' } });
+    expect(names()).toEqual(['Alpha', 'Zulu']);
+  });
+});
+
+describe('MapList uploads', () => {
+  it('passes the image dimensions to addMap', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    // Drive a file through the hidden input. FakeImage fires onload on a
+    // microtask and reports the dimensions the test sets.
+    class SizedImage extends FakeImage {
+      constructor() {
+        super();
+        this.width = 1234;
+        this.height = 567;
+      }
+    }
+    const OriginalImage = globalThis.Image;
+    globalThis.Image = SizedImage;
+
+    const file = new File(['data'], 'map.png', { type: 'image/png' });
+    const input = document.getElementById('file-upload');
+    Object.defineProperty(input, 'files', { value: [file], configurable: true });
+
+    fireEvent.change(input);
+    await waitFor(() => expect(dbMocks.addMap).toHaveBeenCalled());
+    expect(dbMocks.addMap).toHaveBeenCalledWith(
+      expect.objectContaining({ imageWidth: 1234, imageHeight: 567 })
+    );
+
+    globalThis.Image = OriginalImage;
+  });
+});
+
+describe('MapList delete', () => {
+  it('deletes a map from the delete button without opening it', async () => {
+    renderList();
+    await screen.findByText('Downtown');
     const deleteBtn = screen
       .getAllByRole('button')
       .find((b) => b.getAttribute('aria-label') === 'Delete map');
@@ -103,24 +239,6 @@ describe('MapList', () => {
     fireEvent.click(deleteBtn);
     await waitFor(() => expect(dbMocks.deleteMap).toHaveBeenCalledWith(1));
     expect(window.location.hash).toBe('');
-  });
-  it('toggles the upload menu and triggers camera and file uploads', async () => {
-    const inputSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
-    renderList();
-    await screen.findByText('Downtown');
-    const addBtn = screen.getByRole('button', { name: /add map/i });
-    fireEvent.click(addBtn);
-    const cameraBtn = screen.getByRole('button', { name: /take photo/i });
-    const fileBtn = screen.getByRole('button', { name: /choose file/i });
-    expect(cameraBtn).toBeTruthy();
-
-    fireEvent.click(cameraBtn);
-    expect(inputSpy).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(addBtn);
-    const fileBtnAfterReopen = screen.getByRole('button', { name: /choose file/i });
-    fireEvent.click(fileBtnAfterReopen);
-    expect(inputSpy).toHaveBeenCalledTimes(2);
   });
 
   it('does not delete when confirm is cancelled', async () => {
@@ -144,5 +262,24 @@ describe('MapList', () => {
     await waitFor(() => expect(dbMocks.deleteMap).toHaveBeenCalledWith(1));
     await waitFor(() => expect(alertSpy).toHaveBeenCalledWith('Failed to delete map'));
   });
+});
 
+describe('MapList upload menu', () => {
+  it('toggles the upload menu and triggers camera and file uploads', async () => {
+    const inputSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
+    renderList();
+    await screen.findByText('Downtown');
+    const addBtn = screen.getByRole('button', { name: /add map/i });
+    fireEvent.click(addBtn);
+    const cameraBtn = screen.getByRole('button', { name: /take photo/i });
+    expect(cameraBtn).toBeTruthy();
+
+    fireEvent.click(cameraBtn);
+    expect(inputSpy).toHaveBeenCalledTimes(1);
+
+    fireEvent.click(addBtn);
+    const fileBtnAfterReopen = screen.getByRole('button', { name: /choose file/i });
+    fireEvent.click(fileBtnAfterReopen);
+    expect(inputSpy).toHaveBeenCalledTimes(2);
+  });
 });

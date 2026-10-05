@@ -1,5 +1,5 @@
 <script>
-  import { initDB, migrateLegacyPoints } from './lib/db.js';
+  import { initDB, backfillImageDimensions } from './lib/db.js';
   import MapList from './MapList.svelte';
   import MapViewer from './MapViewer.svelte';
 
@@ -7,11 +7,11 @@
   let currentMapId = $state(null);
 
   $effect(() => {
-    // Initialize the database, then sweep any legacy pixel-based reference
-    // points to fractions, before any map is opened.
+    // Initialize the database, then backfill image dimensions on any map that
+    // lacks them, before any map is opened.
     (async () => {
       await initDB();
-      await migrateLegacyPoints();
+      await backfillImageDimensions();
     })();
 
     // Handle hash-based routing

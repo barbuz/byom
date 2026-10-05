@@ -4,12 +4,13 @@ import App from "./App.svelte";
 
 const dbMocks = vi.hoisted(() => ({
   initDB: vi.fn(async () => ({})),
-  migrateLegacyPoints: vi.fn(async () => {}),
+  backfillImageDimensions: vi.fn(async () => {}),
   getAllMaps: vi.fn(async () => []),
   addMap: vi.fn(),
   deleteMap: vi.fn(),
   getMap: vi.fn(async () => ({ id: 1, name: "Test", imageBlob: { blob: true } })),
   getReferencePoints: vi.fn(async () => []),
+  getAllReferencePoints: vi.fn(async () => []),
   addReferencePoint: vi.fn(),
   updateReferencePoint: vi.fn(),
   deleteReferencePoint: vi.fn(),
@@ -27,13 +28,13 @@ describe("App", () => {
     await screen.findByText(/bring your own map/i);
   });
 
-  it("sweeps legacy reference points to fractions on startup", async () => {
-    // The sweep must run from the app entry point, before any map is opened,
-    // or a legacy map stays in pixel coordinates.
-    dbMocks.migrateLegacyPoints.mockClear();
+  it("backfills image dimensions on startup", async () => {
+    // The backfill must run from the app entry point, before any map is opened,
+    // so the landing page can classify without decoding a blob per map.
+    dbMocks.backfillImageDimensions.mockClear();
     render(App);
     await screen.findByText(/bring your own map/i);
-    expect(dbMocks.migrateLegacyPoints).toHaveBeenCalled();
+    expect(dbMocks.backfillImageDimensions).toHaveBeenCalled();
   });
 
   it("routes to the viewer when the hash points to a map", async () => {

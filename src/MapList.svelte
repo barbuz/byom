@@ -1,11 +1,35 @@
 <script>
   import { untrack } from 'svelte';
-  import { getAllMaps, addMap, deleteMap } from './lib/db.js';
+  import { getAllMaps, getAllReferencePoints, addMap, deleteMap } from './lib/db.js';
+  import { createPositionWatch } from './lib/geolocation.js';
+  import {
+    SORT_OPTIONS,
+    boundsDistanceMeters,
+    buildMapSummaries,
+    classifyMaps,
+    positionDistanceMeters,
+    sortSummaries,
+  } from './lib/mapMatch.js';
   import './styles/MapList.css';
 
-  let maps = $state([]);
+  // A fix this close to the last classified one is not worth a recompute.
+  const MOVEMENT_THRESHOLD_M = 5;
+
+  let summaries = $state([]);
   let loading = $state(true);
   let showUploadMenu = $state(false);
+
+  let userPosition = $state(null);
+  let positionStale = $state(false);
+  // The fix the current classification was built from; plain state, not $state,
+  // because it only gates recomputation and never needs to render.
+  let lastClassifiedPosition = null;
+
+  let sortKeys = $state({
+    near: SORT_OPTIONS.near[0].value,
+    incomplete: SORT_OPTIONS.incomplete[0].value,
+    other: SORT_OPTIONS.other[0].value,
+  });
 
   // Release id, injected from package.json by vite.config.js (see Versioning
   // in README.md).
@@ -15,13 +39,66 @@
     untrack(() => loadMaps());
   });
 
+  $effect(() => {
+    const watch = createPositionWatch({
+      onChange: (position) => {
+        // While the page is hidden, leave the classification alone; the next
+        // visible fix is compared against the pre-hide position.
+        if (document.visibilityState === 'hidden') return;
+        if (
+          !lastClassifiedPosition ||
+          positionDistanceMeters(position, lastClassifiedPosition) >= MOVEMENT_THRESHOLD_M
+        ) {
+          lastClassifiedPosition = position;
+          userPosition = position;
+        }
+      },
+      onStale: (stale) => {
+        positionStale = stale;
+      },
+    });
+
+    return () => watch.stop();
+  });
+
+  const classified = $derived(classifyMaps(summaries, userPosition));
+  const nearMaps = $derived(sortSection(classified.near, sortKeys.near, userPosition));
+  const incompleteMaps = $derived(sortSection(classified.incomplete, sortKeys.incomplete, userPosition));
+  const otherMaps = $derived(sortSection(classified.other, sortKeys.other, userPosition));
+
+  function sortSection(list, key, position) {
+    const copy = [...list];
+    sortSummaries(copy, key, { hasFix: Boolean(position), userPosition: position });
+    return copy;
+  }
+
+  function formatDistance(summary) {
+    if (!userPosition || !summary.boundsGeo) return '';
+    const meters = boundsDistanceMeters(
+      summary.boundsGeo,
+      userPosition.longitude,
+      userPosition.latitude,
+    );
+    if (!Number.isFinite(meters)) return '';
+    if (meters === 0) return 'On this map';
+    return meters < 1000 ? `${Math.round(meters)} m away` : `${(meters / 1000).toFixed(1)} km away`;
+  }
+
   async function loadMaps() {
     loading = true;
     try {
-      const result = await getAllMaps();
-      // Sort by timestamp descending (newest first)
-      result.sort((a, b) => b.timestamp - a.timestamp);
-      maps = result;
+      const [maps, points] = await Promise.all([getAllMaps(), getAllReferencePoints()]);
+      // Sort by timestamp descending (newest first) as the base order; the
+      // per-section sort controls reorder on top of it.
+      maps.sort((a, b) => b.timestamp - a.timestamp);
+
+      const pointsByMap = new Map();
+      for (const point of points) {
+        if (!pointsByMap.has(point.mapId)) pointsByMap.set(point.mapId, []);
+        pointsByMap.get(point.mapId).push(point);
+      }
+
+      summaries = buildMapSummaries(maps, pointsByMap);
     } catch (error) {
       console.error('Error loading maps:', error);
       alert('Failed to load maps');
@@ -44,14 +121,16 @@
 
   async function processImageFile(file) {
     try {
-      // Create thumbnail
-      const thumbnail = await createThumbnail(file);
+      // Create thumbnail and capture the natural dimensions
+      const { thumbnail, width, height } = await createThumbnail(file);
       
       // Store full image as blob
       const mapData = {
         name: file.name,
         imageBlob: file,
         thumbnail: thumbnail,
+        imageWidth: width,
+        imageHeight: height,
       };
 
       await addMap(mapData);
@@ -69,6 +148,10 @@
         img.onload = () => {
           const canvas = document.createElement('canvas');
           const MAX_SIZE = 200;
+          // The natural dimensions are what the georeference is expressed
+          // against, so capture them before scaling the thumbnail.
+          const naturalWidth = img.width;
+          const naturalHeight = img.height;
           let width = img.width;
           let height = img.height;
 
@@ -88,7 +171,11 @@
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.7));
+          resolve({
+            thumbnail: canvas.toDataURL('image/jpeg', 0.7),
+            width: naturalWidth,
+            height: naturalHeight,
+          });
         };
         img.onerror = reject;
         img.src = e.target.result;
@@ -174,47 +261,119 @@
 
   {#if loading}
     <div class="loading">Loading maps...</div>
-  {:else if maps.length === 0}
+  {:else if summaries.length === 0}
     <div class="empty-state">
       <p>No maps yet</p>
       <p class="hint">Tap "Add Map" to get started</p>
     </div>
   {:else}
-    <div class="maps-grid">
-      {#each maps as map (map.id)}
-        <div
-            class="map-card"
-            role="button"
-            tabindex="0"
-            aria-label={`Open map ${map.name}`}
-            onclick={() => openMap(map.id)}
-            onkeydown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                openMap(map.id);
-              }
-            }}
-          >
-          <div class="map-thumbnail">
-            <img src={map.thumbnail} alt={map.name} />
-          </div>
-          <div class="map-info">
-            <div class="map-name">{map.name}</div>
-            <div class="map-date">
-              {new Date(map.timestamp).toLocaleDateString()}
-            </div>
-          </div>
-          <button 
-            class="delete-btn" 
-            onclick={(e) => { e.stopPropagation(); handleDeleteMap(map.id, e); }}
-            aria-label="Delete map"
-          >
-            ×
-          </button>
-          </div>
-        {/each}
-    </div>
+    <section class="map-section">
+      <div class="section-header">
+        <h2>📍 Near you</h2>
+        {#if nearMaps.length > 0}
+          <label class="sort-control">
+            Sort
+            <select bind:value={sortKeys.near} aria-label="Sort near-you maps">
+              {#each SORT_OPTIONS.near as option (option.value)}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </label>
+        {/if}
+      </div>
+      {#if !userPosition}
+        <p class="section-message">
+          {positionStale ? 'Location unavailable.' : 'Waiting for your location...'}
+        </p>
+      {:else if nearMaps.length === 0}
+        <p class="section-message">No maps contain your current location.</p>
+      {:else}
+        <div class="maps-grid">
+          {#each nearMaps as map (map.id)}
+            {@render mapCard(map, 'On this map')}
+          {/each}
+        </div>
+      {/if}
+    </section>
+
+    {#if incompleteMaps.length > 0}
+      <section class="map-section">
+        <div class="section-header">
+          <h2>📌 Needs more reference points</h2>
+          <label class="sort-control">
+            Sort
+            <select bind:value={sortKeys.incomplete} aria-label="Sort incomplete maps">
+              {#each SORT_OPTIONS.incomplete as option (option.value)}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+        <div class="maps-grid">
+          {#each incompleteMaps as map (map.id)}
+            {@render mapCard(map, '')}
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    {#if otherMaps.length > 0}
+      <section class="map-section">
+        <div class="section-header">
+          <h2>🗺️ Other maps</h2>
+          <label class="sort-control">
+            Sort
+            <select bind:value={sortKeys.other} aria-label="Sort other maps">
+              {#each SORT_OPTIONS.other as option (option.value)}
+                <option value={option.value}>{option.label}</option>
+              {/each}
+            </select>
+          </label>
+        </div>
+        <div class="maps-grid">
+          {#each otherMaps as map (map.id)}
+            {@render mapCard(map, userPosition ? formatDistance(map) : '')}
+          {/each}
+        </div>
+      </section>
+    {/if}
   {/if}
 
   <footer class="app-version">v{APP_VERSION}</footer>
 </div>
+
+{#snippet mapCard(map, badge)}
+  <div
+    class="map-card"
+    role="button"
+    tabindex="0"
+    aria-label={`Open map ${map.name}`}
+    onclick={() => openMap(map.id)}
+    onkeydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openMap(map.id);
+      }
+    }}
+  >
+    <div class="map-thumbnail">
+      <img src={map.thumbnail} alt={map.name} />
+    </div>
+    <div class="map-info">
+      <div class="map-name">{map.name}</div>
+      <div class="map-date">
+        {new Date(map.timestamp).toLocaleDateString()}
+      </div>
+      {#if badge}
+        <div class="map-badge">{badge}</div>
+      {/if}
+    </div>
+    <button 
+      class="delete-btn" 
+      onclick={(e) => { e.stopPropagation(); handleDeleteMap(map.id, e); }}
+      aria-label="Delete map"
+    >
+      ×
+    </button>
+  </div>
+{/snippet}
