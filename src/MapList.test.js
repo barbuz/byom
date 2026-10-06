@@ -80,8 +80,8 @@ describe('MapList sections', () => {
     await screen.findByText('Downtown');
     // Map 1 contains the fix; map 2 is georeferenced but far; map 3 has too few
     // points to georeference.
-    expect(screen.getByRole('heading', { name: /near you/i })).toBeTruthy();
-    expect(screen.getByRole('heading', { name: /needs more reference points/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /maps here/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /incomplete/i })).toBeTruthy();
     expect(screen.getByRole('heading', { name: /other maps/i })).toBeTruthy();
     expect(screen.getByText('Downtown')).toBeTruthy();
     expect(screen.getByText('Harbor')).toBeTruthy();
@@ -135,7 +135,7 @@ describe('MapList sections', () => {
     emitPosition({ latitude: 46.995, longitude: 8.005, accuracy: 10 });
     await flushPromises();
 
-    expect(screen.getByRole('heading', { name: /near you/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /maps here/i })).toBeTruthy();
     expect(screen.queryByRole('heading', { name: /other maps/i })).toBeNull();
   });
 
@@ -147,29 +147,41 @@ describe('MapList sections', () => {
 
     emitPosition({ latitude: 46.995, longitude: 8.005, accuracy: 10 });
     await flushPromises();
-    expect(screen.getByRole('heading', { name: /near you/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /maps here/i })).toBeTruthy();
 
     // ~1 m away: no recompute, so the section membership is unchanged.
     emitPosition({ latitude: 46.99501, longitude: 8.005, accuracy: 10 });
     await flushPromises();
-    expect(screen.getByRole('heading', { name: /near you/i })).toBeTruthy();
+    expect(screen.getByRole('heading', { name: /maps here/i })).toBeTruthy();
   });
 });
 
 describe('MapList sorting', () => {
-  it('exposes the documented default sort options', async () => {
+  it('exposes the documented default sort options and direction', async () => {
     renderList();
     await screen.findByText('Downtown');
 
-    const nearSort = screen.getByLabelText(/sort near-you maps/i);
+    const nearSort = screen.getByLabelText(/sort maps here/i);
     expect(nearSort.value).toBe('size');
-    expect([...nearSort.options].map((o) => o.value)).toEqual(['size', 'lastModified', 'name']);
+    // Every section offers every key, in the same order.
+    expect([...nearSort.options].map((o) => o.value)).toEqual([
+      'distance', 'size', 'lastModified', 'name',
+    ]);
 
     const incompleteSort = screen.getByLabelText(/sort incomplete maps/i);
     expect(incompleteSort.value).toBe('lastModified');
+    expect([...incompleteSort.options].map((o) => o.value)).toEqual([
+      'distance', 'size', 'lastModified', 'name',
+    ]);
 
     const otherSort = screen.getByLabelText(/sort other maps/i);
     expect(otherSort.value).toBe('distance');
+
+    // Default direction follows the key: last-modified is newest-first (↓).
+    const incompleteDirection = screen.getByLabelText(/sort direction for incomplete maps/i);
+    expect(incompleteDirection.textContent.trim()).toBe('↓');
+    const otherDirection = screen.getByLabelText(/sort direction for other maps/i);
+    expect(otherDirection.textContent.trim()).toBe('↑');
   });
 
   it('reorders a section when the sort control changes', async () => {
@@ -182,7 +194,7 @@ describe('MapList sorting', () => {
     render(MapList);
     await screen.findByText('Zulu');
 
-    const section = screen.getByRole('heading', { name: /needs more reference points/i })
+    const section = screen.getByRole('heading', { name: /incomplete/i })
       .closest('section');
     const names = () => [...section.querySelectorAll('.map-name')].map((n) => n.textContent);
     // Default last-modified desc: Zulu (t=2) before Alpha (t=1).
@@ -191,6 +203,59 @@ describe('MapList sorting', () => {
     const sort = screen.getByLabelText(/sort incomplete maps/i);
     await fireEvent.change(sort, { target: { value: 'name' } });
     expect(names()).toEqual(['Alpha', 'Zulu']);
+  });
+
+  it('flips the order when the direction toggle is clicked', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([
+      { id: 1, name: 'Zulu', thumbnail: 'a', timestamp: 2, imageWidth: 800, imageHeight: 600 },
+      { id: 2, name: 'Alpha', thumbnail: 'b', timestamp: 1, imageWidth: 800, imageHeight: 600 },
+    ]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText('Zulu');
+
+    const section = screen.getByRole('heading', { name: /incomplete/i })
+      .closest('section');
+    const names = () => [...section.querySelectorAll('.map-name')].map((n) => n.textContent);
+    expect(names()).toEqual(['Zulu', 'Alpha']);
+
+    const direction = screen.getByLabelText(/sort direction for incomplete maps/i);
+    await fireEvent.click(direction);
+    // Now ascending by last-modified: the older map first.
+    expect(names()).toEqual(['Alpha', 'Zulu']);
+    expect(direction.textContent.trim()).toBe('↑');
+  });
+
+  it('sorts maps here by distance when chosen', async () => {
+    // Two maps both containing the fix, with different centres.
+    dbMocks.getAllMaps.mockResolvedValue([
+      { id: 1, name: 'Wide', thumbnail: 'a', timestamp: 1, imageWidth: 800, imageHeight: 600 },
+      { id: 2, name: 'Tight', thumbnail: 'b', timestamp: 2, imageWidth: 800, imageHeight: 600 },
+    ]);
+    const wide = [
+      { mapId: 1, u: 0, v: 0, lon: 7.99, lat: 47.0, timestamp: 1 },
+      { mapId: 1, u: 1, v: 0, lon: 8.01, lat: 47.0, timestamp: 1 },
+      { mapId: 1, u: 0, v: 0.75, lon: 7.99, lat: 46.98, timestamp: 1 },
+    ];
+    const tight = [
+      { mapId: 2, u: 0, v: 0, lon: 7.999, lat: 46.996, timestamp: 1 },
+      { mapId: 2, u: 1, v: 0, lon: 8.001, lat: 46.996, timestamp: 1 },
+      { mapId: 2, u: 0, v: 0.75, lon: 7.999, lat: 46.994, timestamp: 1 },
+    ];
+    dbMocks.getAllReferencePoints.mockResolvedValue([...wide, ...tight]);
+    render(MapList);
+    emitPosition({ latitude: 46.995, longitude: 8.0, accuracy: 10 });
+    await screen.findByText('Wide');
+
+    const section = screen.getByRole('heading', { name: /maps here/i }).closest('section');
+    const names = () => [...section.querySelectorAll('.map-name')].map((n) => n.textContent);
+    // Default "size" puts the smaller (Tight) map first.
+    expect(names()).toEqual(['Tight', 'Wide']);
+
+    const sort = screen.getByLabelText(/sort maps here/i);
+    await fireEvent.change(sort, { target: { value: 'distance' } });
+    // The fix is at the tight map's centre, so Tight stays first by distance too.
+    expect(names()).toEqual(['Tight', 'Wide']);
   });
 });
 

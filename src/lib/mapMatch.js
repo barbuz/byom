@@ -168,24 +168,40 @@ export function geoPointInImage(lon, lat, transform, inverse, W, H) {
 }
 
 /**
- * Approximate distance in metres from a point to a lon/lat bounding box, using
- * an equirectangular projection about the box's mid-latitude. Zero when inside.
+ * Geographic centre of a map's lon/lat footprint bounds.
+ * @param {{minLon: number, maxLon: number, minLat: number, maxLat: number}|null} boundsGeo
+ * @returns {{lon: number, lat: number}|null}
+ */
+export function mapCenter(boundsGeo) {
+  if (!boundsGeo) return null;
+  return {
+    lon: (boundsGeo.minLon + boundsGeo.maxLon) / 2,
+    lat: (boundsGeo.minLat + boundsGeo.maxLat) / 2,
+  };
+}
+
+/**
+ * Approximate ground distance in metres from a point to a map's centre, using
+ * an equirectangular projection about the centre's latitude.
+ *
+ * This is the one distance measure the landing page both shows and sorts by, so
+ * a card's badge and its sort position always agree. It is deliberately not the
+ * distance to the footprint's bounding box: a box's edges extend past the actual
+ * (usually rotated) footprint, so clamping to the box reports 0 m for points
+ * that are outside the map — which previously produced a card in "Other maps"
+ * still badged "On this map". Containment is a separate, exact test
+ * (`classifyMaps`).
  * @param {{minLon: number, maxLon: number, minLat: number, maxLat: number}|null} boundsGeo
  * @param {number} lon
  * @param {number} lat
  * @returns {number}
  */
-export function boundsDistanceMeters(boundsGeo, lon, lat) {
-  if (!boundsGeo) return Infinity;
-
-  const clampedLon = Math.min(Math.max(lon, boundsGeo.minLon), boundsGeo.maxLon);
-  const clampedLat = Math.min(Math.max(lat, boundsGeo.minLat), boundsGeo.maxLat);
-  const dLon = wrapLongitude(lon - clampedLon);
-  const dLat = lat - clampedLat;
-  const midLat = (boundsGeo.minLat + boundsGeo.maxLat) / 2;
+export function mapCenterDistanceMeters(boundsGeo, lon, lat) {
+  const center = mapCenter(boundsGeo);
+  if (!center) return Infinity;
   return Math.hypot(
-    dLon * metersPerDegreeLon(midLat),
-    dLat * METERS_PER_DEG_LAT,
+    wrapLongitude(lon - center.lon) * metersPerDegreeLon(center.lat),
+    (lat - center.lat) * METERS_PER_DEG_LAT,
   );
 }
 
@@ -348,61 +364,79 @@ export function classifyMaps(summaries, userPosition) {
     }
   }
 
-  sortSummaries(near, 'size', { hasFix });
-  sortSummaries(incomplete, 'lastModified', { hasFix });
-  sortSummaries(other, hasFix ? 'distance' : 'lastModified', { hasFix, userPosition });
+  sortSummaries(near, DEFAULT_SORT.near, { hasFix, userPosition });
+  sortSummaries(incomplete, DEFAULT_SORT.incomplete, { hasFix, userPosition });
+  sortSummaries(other, hasFix ? DEFAULT_SORT.other : 'lastModified', { hasFix, userPosition });
 
   return { near, incomplete, other };
 }
 
 /**
- * Sort options per section, in display order, with their labels. The first
- * entry is the default.
+ * Every sort key the landing page offers, in display order. All sections offer
+ * the same set, so a map can be ordered by size, distance, recency or name
+ * wherever it appears.
  */
-export const SORT_OPTIONS = {
-  near: [
-    { value: 'size', label: 'Smallest map first' },
-    { value: 'lastModified', label: 'Recently modified' },
-    { value: 'name', label: 'Name' },
-  ],
-  incomplete: [
-    { value: 'lastModified', label: 'Recently modified' },
-    { value: 'name', label: 'Name' },
-  ],
-  other: [
-    { value: 'distance', label: 'Nearest first' },
-    { value: 'lastModified', label: 'Recently modified' },
-    { value: 'name', label: 'Name' },
-  ],
+export const SORT_OPTIONS = [
+  { value: 'distance', label: 'Distance' },
+  { value: 'size', label: 'Map size' },
+  { value: 'lastModified', label: 'Last modified' },
+  { value: 'name', label: 'Name' },
+];
+
+/** The sort key each section defaults to. */
+export const DEFAULT_SORT = {
+  near: 'size',
+  incomplete: 'lastModified',
+  other: 'distance',
 };
 
-const byName = (a, b) => a.name.localeCompare(b.name);
+/** Default direction per key: distance and size read best ascending. */
+export const DEFAULT_DIRECTION = {
+  distance: 'asc',
+  size: 'asc',
+  lastModified: 'desc',
+  name: 'asc',
+};
+
+const byNameAsc = (a, b) => a.name.localeCompare(b.name);
 const bySizeAsc = (a, b) => a.sizeMeters - b.sizeMeters;
-const byLastModifiedDesc = (a, b) => b.lastModified - a.lastModified;
+const byLastModifiedAsc = (a, b) => a.lastModified - b.lastModified;
 
 /**
- * Sort one section in place by the chosen key. `distance` needs a fix; without
- * one it falls back to last-modified. Unknown keys are a no-op.
+ * Sort one section in place by the chosen key and direction. All comparators
+ * order ascending by their natural value, so the direction sign is the single
+ * place that flips an order. `distance` needs a fix; without one it is
+ * meaningless, so it falls back to newest-first. Unknown keys are a no-op.
  * @param {Array<Object>} section
  * @param {string} key
- * @param {{hasFix: boolean, userPosition?: Object}} context
+ * @param {{hasFix?: boolean, userPosition?: Object, direction?: 'asc'|'desc'}} [context]
  */
-export function sortSummaries(section, key, { hasFix = false, userPosition = null } = {}) {
+export function sortSummaries(
+  section,
+  key,
+  { hasFix = false, userPosition = null, direction } = {},
+) {
+  let comparator = null;
+  let dir = direction ?? DEFAULT_DIRECTION[key] ?? 'asc';
+
   if (key === 'size') {
-    section.sort(bySizeAsc);
+    comparator = bySizeAsc;
   } else if (key === 'lastModified') {
-    section.sort(byLastModifiedDesc);
+    comparator = byLastModifiedAsc;
   } else if (key === 'name') {
-    section.sort(byName);
+    comparator = byNameAsc;
   } else if (key === 'distance' && hasFix && userPosition) {
     const lon = userPosition.longitude;
     const lat = userPosition.latitude;
-    section.sort(
-      (a, b) =>
-        boundsDistanceMeters(a.boundsGeo, lon, lat) -
-        boundsDistanceMeters(b.boundsGeo, lon, lat),
-    );
+    comparator = (a, b) =>
+      mapCenterDistanceMeters(a.boundsGeo, lon, lat) -
+      mapCenterDistanceMeters(b.boundsGeo, lon, lat);
   } else if (key === 'distance') {
-    section.sort(byLastModifiedDesc);
+    comparator = byLastModifiedAsc;
+    if (direction === undefined) dir = 'desc';
   }
+
+  if (!comparator) return;
+  const sign = dir === 'desc' ? -1 : 1;
+  section.sort((a, b) => sign * comparator(a, b));
 }

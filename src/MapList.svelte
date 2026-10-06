@@ -3,10 +3,12 @@
   import { getAllMaps, getAllReferencePoints, addMap, deleteMap } from './lib/db.js';
   import { createPositionWatch } from './lib/geolocation.js';
   import {
+    DEFAULT_DIRECTION,
+    DEFAULT_SORT,
     SORT_OPTIONS,
-    boundsDistanceMeters,
     buildMapSummaries,
     classifyMaps,
+    mapCenterDistanceMeters,
     positionDistanceMeters,
     sortSummaries,
   } from './lib/mapMatch.js';
@@ -25,10 +27,12 @@
   // because it only gates recomputation and never needs to render.
   let lastClassifiedPosition = null;
 
-  let sortKeys = $state({
-    near: SORT_OPTIONS.near[0].value,
-    incomplete: SORT_OPTIONS.incomplete[0].value,
-    other: SORT_OPTIONS.other[0].value,
+  // Each section holds its own sort key and direction. Defaults come from
+  // mapMatch so the initial order matches classifyMaps' own default ordering.
+  let sortState = $state({
+    near: { key: DEFAULT_SORT.near, direction: DEFAULT_DIRECTION[DEFAULT_SORT.near] },
+    incomplete: { key: DEFAULT_SORT.incomplete, direction: DEFAULT_DIRECTION[DEFAULT_SORT.incomplete] },
+    other: { key: DEFAULT_SORT.other, direction: DEFAULT_DIRECTION[DEFAULT_SORT.other] },
   });
 
   // Release id, injected from package.json by vite.config.js (see Versioning
@@ -62,26 +66,54 @@
   });
 
   const classified = $derived(classifyMaps(summaries, userPosition));
-  const nearMaps = $derived(sortSection(classified.near, sortKeys.near, userPosition));
-  const incompleteMaps = $derived(sortSection(classified.incomplete, sortKeys.incomplete, userPosition));
-  const otherMaps = $derived(sortSection(classified.other, sortKeys.other, userPosition));
+  const nearMaps = $derived(sortSection(classified.near, sortState.near, userPosition));
+  const incompleteMaps = $derived(sortSection(classified.incomplete, sortState.incomplete, userPosition));
+  const otherMaps = $derived(sortSection(classified.other, sortState.other, userPosition));
 
-  function sortSection(list, key, position) {
+  function sortSection(list, { key, direction }, position) {
     const copy = [...list];
-    sortSummaries(copy, key, { hasFix: Boolean(position), userPosition: position });
+    sortSummaries(copy, key, { hasFix: Boolean(position), userPosition: position, direction });
     return copy;
   }
 
-  function formatDistance(summary) {
-    if (!userPosition || !summary.boundsGeo) return '';
-    const meters = boundsDistanceMeters(
+  function toggleDirection(section) {
+    const current = sortState[section];
+    sortState[section] = {
+      ...current,
+      direction: current.direction === 'asc' ? 'desc' : 'asc',
+    };
+  }
+
+  // Picking a new key resets the direction to that key's natural default, so
+  // e.g. choosing "Name" starts A→Z rather than inheriting the previous key's
+  // descending order.
+  function changeSort(section, key) {
+    sortState[section] = { key, direction: DEFAULT_DIRECTION[key] ?? 'asc' };
+  }
+
+  function distanceMeters(summary) {
+    if (!userPosition || !summary.boundsGeo) return null;
+    const meters = mapCenterDistanceMeters(
       summary.boundsGeo,
       userPosition.longitude,
       userPosition.latitude,
     );
-    if (!Number.isFinite(meters)) return '';
-    if (meters === 0) return 'On this map';
+    return Number.isFinite(meters) ? meters : null;
+  }
+
+  function formatDistance(summary) {
+    const meters = distanceMeters(summary);
+    if (meters === null) return '';
     return meters < 1000 ? `${Math.round(meters)} m away` : `${(meters / 1000).toFixed(1)} km away`;
+  }
+
+  // Near cards confirm containment; append the centre distance so the distance
+  // they can be sorted by is also visible. A map centred on the user is just
+  // "On this map" rather than "0 m away".
+  function nearBadge(summary) {
+    const meters = distanceMeters(summary);
+    if (meters === null || meters < 10) return 'On this map';
+    return `On this map · ${formatDistance(summary)}`;
   }
 
   async function loadMaps() {
@@ -269,16 +301,9 @@
   {:else}
     <section class="map-section">
       <div class="section-header">
-        <h2>📍 Near you</h2>
+        <h2>📍 Maps here</h2>
         {#if nearMaps.length > 0}
-          <label class="sort-control">
-            Sort
-            <select bind:value={sortKeys.near} aria-label="Sort near-you maps">
-              {#each SORT_OPTIONS.near as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
+          {@render sortControl('near', 'Maps here')}
         {/if}
       </div>
       {#if !userPosition}
@@ -290,7 +315,7 @@
       {:else}
         <div class="maps-grid">
           {#each nearMaps as map (map.id)}
-            {@render mapCard(map, 'On this map')}
+            {@render mapCard(map, nearBadge(map))}
           {/each}
         </div>
       {/if}
@@ -299,15 +324,8 @@
     {#if incompleteMaps.length > 0}
       <section class="map-section">
         <div class="section-header">
-          <h2>📌 Needs more reference points</h2>
-          <label class="sort-control">
-            Sort
-            <select bind:value={sortKeys.incomplete} aria-label="Sort incomplete maps">
-              {#each SORT_OPTIONS.incomplete as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
+          <h2>📌 Incomplete</h2>
+          {@render sortControl('incomplete', 'Incomplete maps')}
         </div>
         <div class="maps-grid">
           {#each incompleteMaps as map (map.id)}
@@ -321,14 +339,7 @@
       <section class="map-section">
         <div class="section-header">
           <h2>🗺️ Other maps</h2>
-          <label class="sort-control">
-            Sort
-            <select bind:value={sortKeys.other} aria-label="Sort other maps">
-              {#each SORT_OPTIONS.other as option (option.value)}
-                <option value={option.value}>{option.label}</option>
-              {/each}
-            </select>
-          </label>
+          {@render sortControl('other', 'Other maps')}
         </div>
         <div class="maps-grid">
           {#each otherMaps as map (map.id)}
@@ -341,6 +352,29 @@
 
   <footer class="app-version">v{APP_VERSION}</footer>
 </div>
+
+{#snippet sortControl(section, label)}
+  <div class="sort-control">
+    <select
+      value={sortState[section].key}
+      onchange={(e) => changeSort(section, e.currentTarget.value)}
+      aria-label={`Sort ${label}`}
+    >
+      {#each SORT_OPTIONS as option (option.value)}
+        <option value={option.value}>{option.label}</option>
+      {/each}
+    </select>
+    <button
+      type="button"
+      class="direction-btn"
+      onclick={() => toggleDirection(section)}
+      aria-label={`Sort direction for ${label}`}
+      title={sortState[section].direction === 'asc' ? 'Ascending' : 'Descending'}
+    >
+      {sortState[section].direction === 'asc' ? '↑' : '↓'}
+    </button>
+  </div>
+{/snippet}
 
 {#snippet mapCard(map, badge)}
   <div

@@ -1,13 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
+  DEFAULT_DIRECTION,
+  DEFAULT_SORT,
   SORT_OPTIONS,
-  boundsDistanceMeters,
   buildMapSummaries,
   classifyMaps,
   geoPointInImage,
   imageCornersToGeoBounds,
   imageCornersToMetricBounds,
   lastModified,
+  mapCenter,
+  mapCenterDistanceMeters,
   mapGroundAreaSquareMeters,
   precomputeInverse,
   sortSummaries,
@@ -116,14 +119,28 @@ describe('mapMatch containment', () => {
 });
 
 describe('mapMatch sorting helpers', () => {
-  it('computes zero distance inside a box and grows outside it', () => {
-    const box = { minLon: 8.0, maxLon: 8.01, minLat: 46.99, maxLat: 47.0 };
-    expect(boundsDistanceMeters(box, 8.005, 46.995)).toBe(0);
-    const near = boundsDistanceMeters(box, 8.02, 46.995);
-    const far = boundsDistanceMeters(box, 8.10, 46.995);
+  it('computes the centre of a box and the distance to it', () => {
+    const box = { minLon: 8.0, maxLon: 8.02, minLat: 46.98, maxLat: 47.0 };
+    expect(mapCenter(box).lon).toBeCloseTo(8.01, 9);
+    expect(mapCenter(box).lat).toBeCloseTo(46.99, 9);
+    expect(mapCenter(null)).toBeNull();
+
+    // At the centre the distance is ~0; it grows as the point moves away.
+    expect(mapCenterDistanceMeters(box, 8.01, 46.99)).toBeCloseTo(0, 6);
+    const near = mapCenterDistanceMeters(box, 8.02, 46.99);
+    const far = mapCenterDistanceMeters(box, 8.10, 46.99);
     expect(near).toBeGreaterThan(0);
     expect(far).toBeGreaterThan(near);
-    expect(boundsDistanceMeters(null, 0, 0)).toBe(Infinity);
+    expect(mapCenterDistanceMeters(null, 0, 0)).toBe(Infinity);
+  });
+
+  it('reports a nonzero distance for a point outside a rotated footprint', () => {
+    // Regression: the old box-clamped distance returned 0 for any point inside
+    // the geo AABB, so a map whose rotated footprint excluded the user could
+    // sit in "Other maps" while still badging "On this map".
+    const box = { minLon: 8.0, maxLon: 8.02, minLat: 46.98, maxLat: 47.0 };
+    const corner = { lon: 8.02, lat: 47.0 };
+    expect(mapCenterDistanceMeters(box, corner.lon, corner.lat)).toBeGreaterThan(0);
   });
 
   it('computes a positive ground area and Infinity without bounds', () => {
@@ -139,28 +156,39 @@ describe('mapMatch sorting helpers', () => {
     expect(lastModified({}, [{ timestamp: 7 }])).toBe(7);
   });
 
-  it('sorts by size, last-modified, name and distance', () => {
+  it('sorts by size, last-modified, name and distance with a direction', () => {
     const a = { name: 'B', sizeMeters: 20, lastModified: 1, boundsGeo: { minLon: 0, maxLon: 0, minLat: 0, maxLat: 0 } };
     const b = { name: 'A', sizeMeters: 10, lastModified: 2, boundsGeo: { minLon: 1, maxLon: 1, minLat: 1, maxLat: 1 } };
 
+    // size defaults ascending: the smaller map first.
     const bySize = [a, b];
     sortSummaries(bySize, 'size');
     expect(bySize[0]).toBe(b);
 
+    // lastModified defaults descending: the newer map first.
     const byModified = [a, b];
     sortSummaries(byModified, 'lastModified');
     expect(byModified[0]).toBe(b);
 
+    // name defaults ascending: A before B.
     const byName = [a, b];
     sortSummaries(byName, 'name');
     expect(byName[0]).toBe(b);
 
-    // Distance needs a fix; near b's box sorts b first.
+    // distance needs a fix; at (1, 1) b's box centre is closer.
     const byDistance = [a, b];
     sortSummaries(byDistance, 'distance', { hasFix: true, userPosition: { longitude: 1, latitude: 1 } });
     expect(byDistance[0]).toBe(b);
 
-    // Without a fix, distance falls back to last-modified.
+    // A 'desc' direction flips any of the above.
+    const bySizeDesc = [a, b];
+    sortSummaries(bySizeDesc, 'size', { direction: 'desc' });
+    expect(bySizeDesc[0]).toBe(a);
+    const byNameDesc = [a, b];
+    sortSummaries(byNameDesc, 'name', { direction: 'desc' });
+    expect(byNameDesc[0]).toBe(a);
+
+    // Without a fix, distance is meaningless and falls back to newest-first.
     const noFix = [a, b];
     sortSummaries(noFix, 'distance', { hasFix: false });
     expect(noFix[0]).toBe(b);
@@ -290,9 +318,16 @@ describe('mapMatch classification', () => {
 });
 
 describe('mapMatch sort options', () => {
-  it('defaults each section to its documented key', () => {
-    expect(SORT_OPTIONS.near[0].value).toBe('size');
-    expect(SORT_OPTIONS.incomplete[0].value).toBe('lastModified');
-    expect(SORT_OPTIONS.other[0].value).toBe('distance');
+  it('offers every sort key in every section', () => {
+    const values = SORT_OPTIONS.map((option) => option.value);
+    expect(values).toEqual(['distance', 'size', 'lastModified', 'name']);
+  });
+
+  it('documents a default key and direction per section', () => {
+    expect(DEFAULT_SORT).toEqual({ near: 'size', incomplete: 'lastModified', other: 'distance' });
+    expect(DEFAULT_DIRECTION.lastModified).toBe('desc');
+    expect(DEFAULT_DIRECTION.distance).toBe('asc');
+    expect(DEFAULT_DIRECTION.size).toBe('asc');
+    expect(DEFAULT_DIRECTION.name).toBe('asc');
   });
 });
