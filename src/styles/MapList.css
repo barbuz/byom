@@ -122,7 +122,79 @@ header p {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
   gap: 1rem;
+  margin-top: 1rem;
+}
+
+.map-section {
   margin-top: 2rem;
+}
+
+.section-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+  border-bottom: 1px solid #e0e0e0;
+  padding-bottom: 0.5rem;
+}
+
+.section-header h2 {
+  margin: 0;
+  font-size: 1.15rem;
+  color: #333;
+}
+
+.sort-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.8rem;
+  color: #777;
+  min-width: 0;
+}
+
+.sort-control label {
+  white-space: nowrap;
+}
+
+.sort-control select {
+  font: inherit;
+  padding: 0.25rem 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: white;
+  color: #333;
+  max-width: 100%;
+}
+
+.direction-btn {
+  font: inherit;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  background: white;
+  color: #333;
+  cursor: pointer;
+}
+
+.direction-btn:hover {
+  background: #f0f0f0;
+}
+
+.section-message {
+  margin: 1rem 0 0;
+  color: #777;
+  font-size: 0.9rem;
+}
+
+.map-badge {
+  margin-top: 0.4rem;
+  font-size: 0.8rem;
+  color: #2196F3;
+  font-weight: 500;
 }
 
 .map-card {
@@ -212,5 +284,20 @@ header p {
 
   h1 {
     font-size: 2rem;
+  }
+}
+
+@media (max-width: 480px) {
+  /* Stack the title and its sort control so a wide dropdown never fights the
+     heading for one line. */
+  .section-header {
+    flex-direction: column;
+    align-items: stretch;
+    justify-content: flex-start;
+    gap: 0.5rem;
+  }
+
+  .sort-control select {
+    flex: 1;
   }
 }

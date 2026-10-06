@@ -50,6 +50,8 @@ Once reference points are set, your GPS position appears on the map image automa
 - **Circle** indicates GPS accuracy
 - Updates in real-time as you move
 
+On the landing page, maps are grouped into three sections: **Maps here** (maps whose footprint contains your current location), **Incomplete** (fewer than two points, so not yet georeferenced), and **Other maps**. Each section is labelled **Sort by** and offers distance, map size, last modified and name, with an ascending/descending toggle. Options that cannot work for a section's maps are disabled: size and distance need a georeferenced footprint, so they are greyed out in **Incomplete**. The distance on a card is always measured to the map's centre ("… from map centre") — the same distance the "Distance" sort uses, so a card's badge and its position always agree — and it is shown on every georeferenced card rather than as a containment claim. The page updates as you move.
+
 ## 🔬 Transform Methods
 
 The app uses different mathematical transformations based on the number of reference points. All three share the same representation - a 3x3 homogeneous matrix mapping image pixels to local east/north metres, plus the metric plane's origin - and are fitted in that metric plane rather than raw degrees, so they stay accurate at any latitude and map rotation.
@@ -69,14 +71,16 @@ Longitudes are wrapped into `[-180, 180)` when projecting, so a map crossing the
 byom/
 ├── src/
 │   ├── App.svelte                    # Main app with routing
-│   ├── MapList.svelte                # Landing page with map gallery
+│   ├── MapList.svelte                # Landing page: near/incomplete/other sections
 │   ├── MapViewer.svelte              # Full-screen viewer with gestures
 │   ├── ReferencePointPicker.svelte   # Reference point UI
 │   ├── main.js                       # Entry point
 │   ├── app.css                       # Global styles
 │   └── lib/
 │       ├── db.js                     # IndexedDB wrapper
-│       └── transforms.js             # Transform algorithms
+│       ├── transforms.js             # Transform algorithms
+│       ├── mapMatch.js               # Landing-page containment/classification
+│       └── geolocation.js            # Shared GPS watch + stale-fix watchdog
 ├── public/
 │   ├── manifest.json                 # PWA manifest
 │   ├── sw.js                         # Service worker (version placeholders)
@@ -195,12 +199,14 @@ npm run test:coverage    # vitest run --coverage, enforces coverage thresholds
 | File | Threshold (lines) |
 | --- | --- |
 | `src/lib/transforms.js` | 100% |
-| `src/lib/viewport.js` | 100% |
-| `src/lib/draw.js` | 100% |
+| `src/lib/mapMatch.js` | 100% |
+| `src/lib/geolocation.js` | 100% |
+| `src/lib/viewport.js` | 99% |
+| `src/lib/draw.js` | 99% |
 | `src/lib/db.js` | 100% |
 | `src/components/UserPositionMarker.svelte` | 100% |
 | `src/MapViewer.svelte` | 87% |
-| `src/MapList.svelte` | 62% |
+| `src/MapList.svelte` | 95% |
 
 `reportOnFailure` is enabled, so a threshold failure still produces a report to help diagnose regressions. A run that misses a threshold exits non-zero and breaks CI.
 

@@ -1,11 +1,40 @@
 <script>
   import { untrack } from 'svelte';
-  import { getAllMaps, addMap, deleteMap } from './lib/db.js';
+  import { getAllMaps, getAllReferencePoints, addMap, deleteMap } from './lib/db.js';
+  import { createPositionWatch } from './lib/geolocation.js';
+  import {
+    DEFAULT_DIRECTION,
+    DEFAULT_SORT,
+    SORT_OPTIONS,
+    availableSortKeys,
+    buildMapSummaries,
+    classifyMaps,
+    mapCenterDistanceMeters,
+    positionDistanceMeters,
+    sortSummaries,
+  } from './lib/mapMatch.js';
   import './styles/MapList.css';
 
-  let maps = $state([]);
+  // A fix this close to the last classified one is not worth a recompute.
+  const MOVEMENT_THRESHOLD_M = 5;
+
+  // Distance is shown as "from map centre" so it is never confused with the
+  // badge on a map that actually contains the user.
+  const DISTANCE_FROM_CENTRE = 'from map centre';
+
+  let summaries = $state([]);
   let loading = $state(true);
   let showUploadMenu = $state(false);
+
+  let userPosition = $state(null);
+  let positionStale = $state(false);
+  // The fix the current classification was built from; plain state, not $state,
+  // because it only gates recomputation and never needs to render.
+  let lastClassifiedPosition = null;
+
+  // Each section holds its own sort key and direction. Defaults come from
+  // mapMatch so the initial order matches classifyMaps' own default ordering.
+  let sortState = $state(initialSortState());
 
   // Release id, injected from package.json by vite.config.js (see Versioning
   // in README.md).
@@ -15,13 +44,116 @@
     untrack(() => loadMaps());
   });
 
+  $effect(() => {
+    const watch = createPositionWatch({
+      onChange: (position) => {
+        // While the page is hidden, leave the classification alone; the next
+        // visible fix is compared against the pre-hide position.
+        if (document.visibilityState === 'hidden') return;
+        if (
+          !lastClassifiedPosition ||
+          positionDistanceMeters(position, lastClassifiedPosition) >= MOVEMENT_THRESHOLD_M
+        ) {
+          lastClassifiedPosition = position;
+          userPosition = position;
+        }
+      },
+      onStale: (stale) => {
+        positionStale = stale;
+      },
+    });
+
+    return () => watch.stop();
+  });
+
+  const classified = $derived(classifyMaps(summaries, userPosition));
+  const nearMaps = $derived(sortSection(classified.near, sortState.near, userPosition));
+  const incompleteMaps = $derived(sortSection(classified.incomplete, sortState.incomplete, userPosition));
+  const otherMaps = $derived(sortSection(classified.other, sortState.other, userPosition));
+
+  // The sort keys that work for every map in a section: a section of
+  // ungeoreferenced maps cannot sort by size or distance, so those options are
+  // disabled rather than silently ordering by something else.
+  const sortKeysFor = $derived({
+    near: sectionSortKeys(classified.near),
+    incomplete: sectionSortKeys(classified.incomplete),
+    other: sectionSortKeys(classified.other),
+  });
+
+  function initialSortState() {
+    return {
+      near: { key: DEFAULT_SORT.near, direction: DEFAULT_DIRECTION[DEFAULT_SORT.near] },
+      incomplete: { key: DEFAULT_SORT.incomplete, direction: DEFAULT_DIRECTION[DEFAULT_SORT.incomplete] },
+      other: { key: DEFAULT_SORT.other, direction: DEFAULT_DIRECTION[DEFAULT_SORT.other] },
+    };
+  }
+
+  // Intersection of the per-map sort keys that are meaningful for a section.
+  function sectionSortKeys(list) {
+    const available = list.map(availableSortKeys);
+    return new Set(SORT_OPTIONS.map((o) => o.value).filter(
+      (value) => available.every((keys) => keys.has(value)),
+    ));
+  }
+
+  function sortSection(list, { key, direction }, position) {
+    const copy = [...list];
+    sortSummaries(copy, key, { hasFix: Boolean(position), userPosition: position, direction });
+    return copy;
+  }
+
+  function toggleDirection(section) {
+    const current = sortState[section];
+    sortState[section] = {
+      ...current,
+      direction: current.direction === 'asc' ? 'desc' : 'asc',
+    };
+  }
+
+  // Picking a new key resets the direction to that key's natural default, so
+  // e.g. choosing "Name" starts A→Z rather than inheriting the previous key's
+  // descending order.
+  function changeSort(section, key) {
+    sortState[section] = { key, direction: DEFAULT_DIRECTION[key] ?? 'asc' };
+  }
+
+  function distanceMeters(summary) {
+    if (!userPosition || !summary.boundsGeo) return null;
+    const meters = mapCenterDistanceMeters(
+      summary.boundsGeo,
+      userPosition.longitude,
+      userPosition.latitude,
+    );
+    return Number.isFinite(meters) ? meters : null;
+  }
+
+  // Shown on every georeferenced card, with no "On this map" wording: the
+  // number is always the distance to the map's centre, so a map the user is
+  // standing on still reads a small distance rather than a containment claim.
+  function formatDistance(summary) {
+    const meters = distanceMeters(summary);
+    if (meters === null) return '';
+    const distance = meters < 1000
+      ? `${Math.round(meters)} m`
+      : `${(meters / 1000).toFixed(1)} km`;
+    return `${distance} ${DISTANCE_FROM_CENTRE}`;
+  }
+
   async function loadMaps() {
     loading = true;
     try {
-      const result = await getAllMaps();
-      // Sort by timestamp descending (newest first)
-      result.sort((a, b) => b.timestamp - a.timestamp);
-      maps = result;
+      const [maps, points] = await Promise.all([getAllMaps(), getAllReferencePoints()]);
+      // Sort by timestamp descending (newest first) as the base order; the
+      // per-section sort controls reorder on top of it.
+      maps.sort((a, b) => b.timestamp - a.timestamp);
+
+      const pointsByMap = new Map();
+      for (const point of points) {
+        if (!pointsByMap.has(point.mapId)) pointsByMap.set(point.mapId, []);
+        pointsByMap.get(point.mapId).push(point);
+      }
+
+      summaries = buildMapSummaries(maps, pointsByMap);
     } catch (error) {
       console.error('Error loading maps:', error);
       alert('Failed to load maps');
@@ -44,14 +176,16 @@
 
   async function processImageFile(file) {
     try {
-      // Create thumbnail
-      const thumbnail = await createThumbnail(file);
+      // Create thumbnail and capture the natural dimensions
+      const { thumbnail, width, height } = await createThumbnail(file);
       
       // Store full image as blob
       const mapData = {
         name: file.name,
         imageBlob: file,
         thumbnail: thumbnail,
+        imageWidth: width,
+        imageHeight: height,
       };
 
       await addMap(mapData);
@@ -69,6 +203,10 @@
         img.onload = () => {
           const canvas = document.createElement('canvas');
           const MAX_SIZE = 200;
+          // The natural dimensions are what the georeference is expressed
+          // against, so capture them before scaling the thumbnail.
+          const naturalWidth = img.width;
+          const naturalHeight = img.height;
           let width = img.width;
           let height = img.height;
 
@@ -88,7 +226,11 @@
           canvas.height = height;
           const ctx = canvas.getContext('2d');
           ctx.drawImage(img, 0, 0, width, height);
-          resolve(canvas.toDataURL('image/jpeg', 0.7));
+          resolve({
+            thumbnail: canvas.toDataURL('image/jpeg', 0.7),
+            width: naturalWidth,
+            height: naturalHeight,
+          });
         };
         img.onerror = reject;
         img.src = e.target.result;
@@ -174,47 +316,125 @@
 
   {#if loading}
     <div class="loading">Loading maps...</div>
-  {:else if maps.length === 0}
+  {:else if summaries.length === 0}
     <div class="empty-state">
       <p>No maps yet</p>
       <p class="hint">Tap "Add Map" to get started</p>
     </div>
   {:else}
-    <div class="maps-grid">
-      {#each maps as map (map.id)}
-        <div
-            class="map-card"
-            role="button"
-            tabindex="0"
-            aria-label={`Open map ${map.name}`}
-            onclick={() => openMap(map.id)}
-            onkeydown={(e) => {
-              if (e.key === 'Enter' || e.key === ' ') {
-                e.preventDefault();
-                openMap(map.id);
-              }
-            }}
-          >
-          <div class="map-thumbnail">
-            <img src={map.thumbnail} alt={map.name} />
-          </div>
-          <div class="map-info">
-            <div class="map-name">{map.name}</div>
-            <div class="map-date">
-              {new Date(map.timestamp).toLocaleDateString()}
-            </div>
-          </div>
-          <button 
-            class="delete-btn" 
-            onclick={(e) => { e.stopPropagation(); handleDeleteMap(map.id, e); }}
-            aria-label="Delete map"
-          >
-            ×
-          </button>
-          </div>
-        {/each}
-    </div>
+    <section class="map-section">
+      <div class="section-header">
+        <h2>📍 Maps here</h2>
+        {#if nearMaps.length > 0}
+          {@render sortControl('near', 'Maps here')}
+        {/if}
+      </div>
+      {#if !userPosition}
+        <p class="section-message">
+          {positionStale ? 'Location unavailable.' : 'Waiting for your location...'}
+        </p>
+      {:else if nearMaps.length === 0}
+        <p class="section-message">No maps contain your current location.</p>
+      {:else}
+        <div class="maps-grid">
+          {#each nearMaps as map (map.id)}
+            {@render mapCard(map, formatDistance(map))}
+          {/each}
+        </div>
+      {/if}
+    </section>
+
+    {#if incompleteMaps.length > 0}
+      <section class="map-section">
+        <div class="section-header">
+          <h2>📌 Incomplete</h2>
+          {@render sortControl('incomplete', 'Incomplete maps')}
+        </div>
+        <div class="maps-grid">
+          {#each incompleteMaps as map (map.id)}
+            {@render mapCard(map, '')}
+          {/each}
+        </div>
+      </section>
+    {/if}
+
+    {#if otherMaps.length > 0}
+      <section class="map-section">
+        <div class="section-header">
+          <h2>🗺️ Other maps</h2>
+          {@render sortControl('other', 'Other maps')}
+        </div>
+        <div class="maps-grid">
+          {#each otherMaps as map (map.id)}
+            {@render mapCard(map, formatDistance(map))}
+          {/each}
+        </div>
+      </section>
+    {/if}
   {/if}
 
   <footer class="app-version">v{APP_VERSION}</footer>
 </div>
+
+{#snippet sortControl(section, label)}
+  <div class="sort-control">
+    <label for={`sort-${section}`}>Sort by</label>
+    <select
+      id={`sort-${section}`}
+      value={sortState[section].key}
+      onchange={(e) => changeSort(section, e.currentTarget.value)}
+      aria-label={`Sort ${label}`}
+    >
+      {#each SORT_OPTIONS as option (option.value)}
+        <option value={option.value} disabled={!sortKeysFor[section].has(option.value)}>
+          {option.label}
+        </option>
+      {/each}
+    </select>
+    <button
+      type="button"
+      class="direction-btn"
+      onclick={() => toggleDirection(section)}
+      aria-label={`Sort direction for ${label}`}
+      title={sortState[section].direction === 'asc' ? 'Ascending' : 'Descending'}
+    >
+      {sortState[section].direction === 'asc' ? '↑' : '↓'}
+    </button>
+  </div>
+{/snippet}
+
+{#snippet mapCard(map, badge)}
+  <div
+    class="map-card"
+    role="button"
+    tabindex="0"
+    aria-label={`Open map ${map.name}`}
+    onclick={() => openMap(map.id)}
+    onkeydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        openMap(map.id);
+      }
+    }}
+  >
+    <div class="map-thumbnail">
+      <img src={map.thumbnail} alt={map.name} />
+    </div>
+    <div class="map-info">
+      <div class="map-name">{map.name}</div>
+      <div class="map-date">
+        {new Date(map.timestamp).toLocaleDateString()}
+      </div>
+      {#if badge}
+        <div class="map-badge">{badge}</div>
+      {/if}
+    </div>
+    <button 
+      class="delete-btn" 
+      onclick={(e) => { e.stopPropagation(); handleDeleteMap(map.id, e); }}
+      aria-label="Delete map"
+    >
+      ×
+    </button>
+  </div>
+{/snippet}

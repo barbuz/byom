@@ -6,8 +6,9 @@ import { describe, it, expect, vi, afterEach } from "vitest";
 // effect_orphan and rendered a blank page.
 const dbMocks = vi.hoisted(() => ({
   initDB: vi.fn(async () => ({})),
-  migrateLegacyPoints: vi.fn(async () => {}),
+  backfillImageDimensions: vi.fn(async () => {}),
   getAllMaps: vi.fn(async () => []),
+  getAllReferencePoints: vi.fn(async () => []),
   addMap: vi.fn(),
   deleteMap: vi.fn(),
 }));

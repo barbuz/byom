@@ -200,7 +200,7 @@ npm run deploy
 }
 ```
 
-Coordinates are fractional (`u`, `v` in `[0,1]` of the image's longest side) rather than pixels, so a reference point keeps its meaning when the image is re-encoded at a different resolution. Legacy rows storing `imageX`/`imageY` pixels are converted on first boot by `migrateLegacyPoints`.
+Coordinates are fractional (`u`, `v` in `[0,1]` of the image's longest side) rather than pixels, so a reference point keeps its meaning when the image is re-encoded at a different resolution. Maps also store their natural `imageWidth`/`imageHeight`; maps added before that field existed are backfilled on first boot by `backfillImageDimensions`.
 
 ## Customization Ideas
 
