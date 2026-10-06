@@ -96,6 +96,14 @@ describe('MapList sections', () => {
     expect(screen.getByText(/waiting for your location/i)).toBeTruthy();
   });
 
+  it('shows the distance to the map centre without an "On this map" claim', async () => {
+    renderList();
+    await screen.findByText('Downtown');
+    // The near map's badge is a plain centre distance, not a containment claim.
+    expect(screen.queryByText(/on this map/i)).toBeNull();
+    expect(screen.getAllByText(/from map centre$/).length).toBeGreaterThan(0);
+  });
+
   it('renders map cards with name, date and delete button', async () => {
     renderList();
     await screen.findByText('Downtown');
@@ -167,15 +175,24 @@ describe('MapList sorting', () => {
     expect([...nearSort.options].map((o) => o.value)).toEqual([
       'distance', 'size', 'lastModified', 'name',
     ]);
+    // The near section is georeferenced, so nothing is disabled.
+    expect([...nearSort.options].every((o) => !o.disabled)).toBe(true);
 
     const incompleteSort = screen.getByLabelText(/sort incomplete maps/i);
     expect(incompleteSort.value).toBe('lastModified');
     expect([...incompleteSort.options].map((o) => o.value)).toEqual([
       'distance', 'size', 'lastModified', 'name',
     ]);
+    // Ungeoreferenced maps have no footprint, so size and distance are disabled.
+    expect(
+      Object.fromEntries([...incompleteSort.options].map((o) => [o.value, o.disabled])),
+    ).toEqual({ distance: true, size: true, lastModified: false, name: false });
 
     const otherSort = screen.getByLabelText(/sort other maps/i);
     expect(otherSort.value).toBe('distance');
+
+    // The controls are labelled "Sort by".
+    expect(screen.getAllByText('Sort by')).toHaveLength(3);
 
     // Default direction follows the key: last-modified is newest-first (↓).
     const incompleteDirection = screen.getByLabelText(/sort direction for incomplete maps/i);

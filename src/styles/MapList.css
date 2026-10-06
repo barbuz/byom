@@ -154,6 +154,10 @@ header p {
   min-width: 0;
 }
 
+.sort-control label {
+  white-space: nowrap;
+}
+
 .sort-control select {
   font: inherit;
   padding: 0.25rem 0.4rem;

@@ -6,6 +6,7 @@
     DEFAULT_DIRECTION,
     DEFAULT_SORT,
     SORT_OPTIONS,
+    availableSortKeys,
     buildMapSummaries,
     classifyMaps,
     mapCenterDistanceMeters,
@@ -16,6 +17,10 @@
 
   // A fix this close to the last classified one is not worth a recompute.
   const MOVEMENT_THRESHOLD_M = 5;
+
+  // Distance is shown as "from map centre" so it is never confused with the
+  // badge on a map that actually contains the user.
+  const DISTANCE_FROM_CENTRE = 'from map centre';
 
   let summaries = $state([]);
   let loading = $state(true);
@@ -29,11 +34,7 @@
 
   // Each section holds its own sort key and direction. Defaults come from
   // mapMatch so the initial order matches classifyMaps' own default ordering.
-  let sortState = $state({
-    near: { key: DEFAULT_SORT.near, direction: DEFAULT_DIRECTION[DEFAULT_SORT.near] },
-    incomplete: { key: DEFAULT_SORT.incomplete, direction: DEFAULT_DIRECTION[DEFAULT_SORT.incomplete] },
-    other: { key: DEFAULT_SORT.other, direction: DEFAULT_DIRECTION[DEFAULT_SORT.other] },
-  });
+  let sortState = $state(initialSortState());
 
   // Release id, injected from package.json by vite.config.js (see Versioning
   // in README.md).
@@ -70,6 +71,31 @@
   const incompleteMaps = $derived(sortSection(classified.incomplete, sortState.incomplete, userPosition));
   const otherMaps = $derived(sortSection(classified.other, sortState.other, userPosition));
 
+  // The sort keys that work for every map in a section: a section of
+  // ungeoreferenced maps cannot sort by size or distance, so those options are
+  // disabled rather than silently ordering by something else.
+  const sortKeysFor = $derived({
+    near: sectionSortKeys(classified.near),
+    incomplete: sectionSortKeys(classified.incomplete),
+    other: sectionSortKeys(classified.other),
+  });
+
+  function initialSortState() {
+    return {
+      near: { key: DEFAULT_SORT.near, direction: DEFAULT_DIRECTION[DEFAULT_SORT.near] },
+      incomplete: { key: DEFAULT_SORT.incomplete, direction: DEFAULT_DIRECTION[DEFAULT_SORT.incomplete] },
+      other: { key: DEFAULT_SORT.other, direction: DEFAULT_DIRECTION[DEFAULT_SORT.other] },
+    };
+  }
+
+  // Intersection of the per-map sort keys that are meaningful for a section.
+  function sectionSortKeys(list) {
+    const available = list.map(availableSortKeys);
+    return new Set(SORT_OPTIONS.map((o) => o.value).filter(
+      (value) => available.every((keys) => keys.has(value)),
+    ));
+  }
+
   function sortSection(list, { key, direction }, position) {
     const copy = [...list];
     sortSummaries(copy, key, { hasFix: Boolean(position), userPosition: position, direction });
@@ -101,19 +127,16 @@
     return Number.isFinite(meters) ? meters : null;
   }
 
+  // Shown on every georeferenced card, with no "On this map" wording: the
+  // number is always the distance to the map's centre, so a map the user is
+  // standing on still reads a small distance rather than a containment claim.
   function formatDistance(summary) {
     const meters = distanceMeters(summary);
     if (meters === null) return '';
-    return meters < 1000 ? `${Math.round(meters)} m away` : `${(meters / 1000).toFixed(1)} km away`;
-  }
-
-  // Near cards confirm containment; append the centre distance so the distance
-  // they can be sorted by is also visible. A map centred on the user is just
-  // "On this map" rather than "0 m away".
-  function nearBadge(summary) {
-    const meters = distanceMeters(summary);
-    if (meters === null || meters < 10) return 'On this map';
-    return `On this map · ${formatDistance(summary)}`;
+    const distance = meters < 1000
+      ? `${Math.round(meters)} m`
+      : `${(meters / 1000).toFixed(1)} km`;
+    return `${distance} ${DISTANCE_FROM_CENTRE}`;
   }
 
   async function loadMaps() {
@@ -315,7 +338,7 @@
       {:else}
         <div class="maps-grid">
           {#each nearMaps as map (map.id)}
-            {@render mapCard(map, nearBadge(map))}
+            {@render mapCard(map, formatDistance(map))}
           {/each}
         </div>
       {/if}
@@ -343,7 +366,7 @@
         </div>
         <div class="maps-grid">
           {#each otherMaps as map (map.id)}
-            {@render mapCard(map, userPosition ? formatDistance(map) : '')}
+            {@render mapCard(map, formatDistance(map))}
           {/each}
         </div>
       </section>
@@ -355,13 +378,17 @@
 
 {#snippet sortControl(section, label)}
   <div class="sort-control">
+    <label for={`sort-${section}`}>Sort by</label>
     <select
+      id={`sort-${section}`}
       value={sortState[section].key}
       onchange={(e) => changeSort(section, e.currentTarget.value)}
       aria-label={`Sort ${label}`}
     >
       {#each SORT_OPTIONS as option (option.value)}
-        <option value={option.value}>{option.label}</option>
+        <option value={option.value} disabled={!sortKeysFor[section].has(option.value)}>
+          {option.label}
+        </option>
       {/each}
     </select>
     <button

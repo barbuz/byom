@@ -3,6 +3,7 @@ import {
   DEFAULT_DIRECTION,
   DEFAULT_SORT,
   SORT_OPTIONS,
+  availableSortKeys,
   buildMapSummaries,
   classifyMaps,
   geoPointInImage,
@@ -329,5 +330,17 @@ describe('mapMatch sort options', () => {
     expect(DEFAULT_DIRECTION.distance).toBe('asc');
     expect(DEFAULT_DIRECTION.size).toBe('asc');
     expect(DEFAULT_DIRECTION.name).toBe('asc');
+  });
+
+  it('disables size and distance for maps without a footprint', () => {
+    // Ungeoreferenced maps can still be sorted by recency and name.
+    expect([...availableSortKeys({ boundsGeo: null })].sort()).toEqual(['lastModified', 'name']);
+    expect(availableSortKeys({}).has('size')).toBe(false);
+
+    // A georeferenced map offers all four keys.
+    const georeferenced = { boundsGeo: { minLon: 0, maxLon: 1, minLat: 0, maxLat: 1 } };
+    expect([...availableSortKeys(georeferenced)].sort()).toEqual([
+      'distance', 'lastModified', 'name', 'size',
+    ]);
   });
 });

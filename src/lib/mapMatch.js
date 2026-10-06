@@ -390,6 +390,24 @@ export const DEFAULT_SORT = {
   other: 'distance',
 };
 
+/**
+ * The sort keys that can meaningfully order a single map: distance and size
+ * need a georeferenced footprint (so a map with too few reference points has
+ * neither), while last-modified and name always apply. The landing page offers
+ * only these per section, so a section of ungeoreferenced maps disables the
+ * size and distance options instead of presenting a sort that cannot work.
+ * @param {Object} summary
+ * @returns {Set<string>}
+ */
+export function availableSortKeys(summary) {
+  const keys = new Set(['lastModified', 'name']);
+  if (summary?.boundsGeo) {
+    keys.add('distance');
+    keys.add('size');
+  }
+  return keys;
+}
+
 /** Default direction per key: distance and size read best ascending. */
 export const DEFAULT_DIRECTION = {
   distance: 'asc',

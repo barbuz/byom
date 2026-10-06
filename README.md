@@ -50,7 +50,7 @@ Once reference points are set, your GPS position appears on the map image automa
 - **Circle** indicates GPS accuracy
 - Updates in real-time as you move
 
-On the landing page, maps are grouped into three sections: **Maps here** (maps whose footprint contains your current location), **Incomplete** (fewer than two points, so not yet georeferenced), and **Other maps**. Every section offers the same sort keys — distance, map size, last modified and name — each with an ascending/descending toggle. The distance shown on a card is measured to the map's centre, and is the same distance the "Distance" sort uses, so a card's badge and its position always agree. The page updates as you move.
+On the landing page, maps are grouped into three sections: **Maps here** (maps whose footprint contains your current location), **Incomplete** (fewer than two points, so not yet georeferenced), and **Other maps**. Each section is labelled **Sort by** and offers distance, map size, last modified and name, with an ascending/descending toggle. Options that cannot work for a section's maps are disabled: size and distance need a georeferenced footprint, so they are greyed out in **Incomplete**. The distance on a card is always measured to the map's centre ("… from map centre") — the same distance the "Distance" sort uses, so a card's badge and its position always agree — and it is shown on every georeferenced card rather than as a containment claim. The page updates as you move.
 
 ## 🔬 Transform Methods
 
