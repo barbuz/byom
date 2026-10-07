@@ -4,7 +4,7 @@ A Progressive Web App for georeferencing map photos and viewing your GPS locatio
 
 ## ✨ Features
 
-- 📷 **Load map images** from camera or files
+- 📷 **Load map images or PDFs** from camera or files
 - 📍 **Set reference points** to georeference maps
 - 🧭 **See your GPS location** on the map image in real-time
 - 📱 **Mobile-first design** with pinch-zoom, pan, and rotate gestures
@@ -34,7 +34,7 @@ For detailed setup instructions, see [QUICKSTART.md](QUICKSTART.md)
 ## 📖 How It Works
 
 ### 1. Add a Map
-On the landing page, use the camera or file upload to add a map image. Images are stored locally in IndexedDB.
+On the landing page, use the camera or file upload to add a map image or PDF. A PDF is rasterised to an image when you add it; if it has more than one page you are asked which page to import. Everything is stored locally in IndexedDB.
 
 ### 2. Add Reference Points
 Select at least 2 reference points by:

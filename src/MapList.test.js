@@ -3,6 +3,8 @@ import { render, fireEvent, screen, waitFor } from '@testing-library/svelte';
 import { flushPromises, FakeImage } from '../tests/setup.js';
 import MapList from './MapList.svelte';
 
+const OriginalImage = globalThis.Image;
+
 const dbMocks = vi.hoisted(() => ({
   getAllMaps: vi.fn(),
   getAllReferencePoints: vi.fn(),
@@ -11,6 +13,14 @@ const dbMocks = vi.hoisted(() => ({
 }));
 
 vi.mock('./lib/db.js', () => dbMocks);
+
+const pdfMocks = vi.hoisted(() => ({
+  isPdfFile: vi.fn(() => false),
+  loadPdf: vi.fn(),
+  renderPdfPageToBlob: vi.fn(async () => new Blob(['png'], { type: 'image/png' })),
+}));
+
+vi.mock('./lib/pdf.js', () => pdfMocks);
 
 // Two reference points on an 800x600 image place the map around (8.005, 46.995).
 const POINTS_NEAR = [
@@ -36,6 +46,10 @@ afterEach(() => {
   window.location.hash = '';
   vi.clearAllMocks();
   vi.restoreAllMocks();
+  // clearAllMocks keeps mock implementations but not a plain `mockReturnValue`;
+  // reset the PDF default so image tests are not treated as PDFs.
+  pdfMocks.isPdfFile.mockReturnValue(false);
+  globalThis.Image = OriginalImage;
 });
 
 function emitPosition(coords) {
@@ -309,6 +323,79 @@ describe('MapList uploads', () => {
   });
 });
 
+describe('MapList PDF uploads', () => {
+  function selectFiles(files) {
+    const input = document.getElementById('file-upload');
+    Object.defineProperty(input, 'files', { value: files, configurable: true });
+    fireEvent.change(input);
+    return input;
+  }
+
+  it('imports a single-page PDF without asking for a page', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    pdfMocks.isPdfFile.mockReturnValue(true);
+    pdfMocks.loadPdf.mockResolvedValue({ numPages: 1 });
+    globalThis.Image = FakeImage;
+
+    selectFiles([new File(['pdf'], 'plans.pdf', { type: 'application/pdf' })]);
+
+    await waitFor(() => expect(dbMocks.addMap).toHaveBeenCalled());
+    expect(screen.queryByRole('dialog')).toBeNull();
+    expect(dbMocks.addMap).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'plans.pdf' })
+    );
+  });
+
+  it('asks which page of a multi-page PDF and imports the chosen one', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    pdfMocks.isPdfFile.mockReturnValue(true);
+    pdfMocks.loadPdf.mockResolvedValue({ numPages: 5 });
+    globalThis.Image = FakeImage;
+
+    selectFiles([new File(['pdf'], 'atlas.pdf', { type: 'application/pdf' })]);
+
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.textContent).toContain('5');
+
+    const pageInput = screen.getByRole('spinbutton');
+    await fireEvent.input(pageInput, { target: { value: '3' } });
+    await fireEvent.click(screen.getByRole('button', { name: /import page/i }));
+
+    await waitFor(() => expect(dbMocks.addMap).toHaveBeenCalled());
+    expect(pdfMocks.renderPdfPageToBlob).toHaveBeenCalledWith(expect.anything(), 3);
+    expect(dbMocks.addMap).toHaveBeenCalledWith(
+      expect.objectContaining({ name: 'atlas.pdf (page 3/5)' })
+    );
+  });
+
+  it('imports nothing when the page choice is cancelled', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    pdfMocks.isPdfFile.mockReturnValue(true);
+    pdfMocks.loadPdf.mockResolvedValue({ numPages: 5 });
+    globalThis.Image = FakeImage;
+
+    selectFiles([new File(['pdf'], 'atlas.pdf', { type: 'application/pdf' })]);
+
+    await screen.findByRole('dialog');
+    await fireEvent.click(screen.getByRole('button', { name: /cancel/i }));
+
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(dbMocks.addMap).not.toHaveBeenCalled();
+  });
+});
+
 describe('MapList delete', () => {
   it('deletes a map from the delete button without opening it', async () => {
     renderList();
@@ -346,22 +433,19 @@ describe('MapList delete', () => {
   });
 });
 
-describe('MapList upload menu', () => {
-  it('toggles the upload menu and triggers camera and file uploads', async () => {
+describe('MapList add map', () => {
+  it('opens the file picker directly without a second chooser', async () => {
     const inputSpy = vi.spyOn(HTMLInputElement.prototype, 'click').mockImplementation(() => {});
     renderList();
     await screen.findByText('Downtown');
+
     const addBtn = screen.getByRole('button', { name: /add map/i });
     fireEvent.click(addBtn);
-    const cameraBtn = screen.getByRole('button', { name: /take photo/i });
-    expect(cameraBtn).toBeTruthy();
 
-    fireEvent.click(cameraBtn);
+    // The native chooser already offers camera and files, so the app must not
+    // intercept the tap with its own duplicate menu.
     expect(inputSpy).toHaveBeenCalledTimes(1);
-
-    fireEvent.click(addBtn);
-    const fileBtnAfterReopen = screen.getByRole('button', { name: /choose file/i });
-    fireEvent.click(fileBtnAfterReopen);
-    expect(inputSpy).toHaveBeenCalledTimes(2);
+    expect(screen.queryByRole('button', { name: /take photo/i })).toBeNull();
+    expect(screen.queryByRole('button', { name: /choose file/i })).toBeNull();
   });
 });
