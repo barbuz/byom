@@ -1,10 +1,13 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   MAX_RENDER_DIMENSION,
+  SETTLED_PREVIEW_DIMENSION,
+  SCROLL_PREVIEW_DIMENSION,
   isPdfFile,
   loadPdf,
   pageRenderScale,
   renderPdfPageToBlob,
+  renderPdfPageToCanvas,
 } from './pdf.js';
 
 vi.mock('pdfjs-dist', () => {
@@ -44,6 +47,31 @@ describe('pageRenderScale', () => {
 
   it('defaults to the module cap', () => {
     expect(pageRenderScale({ width: MAX_RENDER_DIMENSION * 2, height: 100 })).toBe(0.5);
+  });
+});
+
+describe('renderPdfPageToCanvas', () => {
+  it('sizes the canvas and returns the cancellable render task', async () => {
+    const task = { promise: Promise.resolve(), cancel: vi.fn() };
+    const page = {
+      getViewport: ({ scale }) => ({ width: 1000 * scale, height: 500 * scale }),
+      render: vi.fn(() => task),
+    };
+    const doc = { getPage: vi.fn(async () => page) };
+    const canvas = { width: 0, height: 0, getContext: () => ({}) };
+
+    const started = await renderPdfPageToCanvas(doc, 2, canvas, { maxEdge: 500 });
+
+    expect(doc.getPage).toHaveBeenCalledWith(2);
+    expect(canvas.width).toBe(500);
+    expect(canvas.height).toBe(250);
+    expect(started).toBe(task);
+  });
+});
+
+describe('preview tiers', () => {
+  it('orders the scroll preview below the settled preview', () => {
+    expect(SCROLL_PREVIEW_DIMENSION).toBeLessThan(SETTLED_PREVIEW_DIMENSION);
   });
 });
 

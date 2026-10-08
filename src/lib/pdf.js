@@ -7,6 +7,13 @@
 // memory on phones.
 export const MAX_RENDER_DIMENSION = 3000;
 
+// Two preview tiers for the page picker: a cheap pass drawn while the slider
+// moves, and a detailed pass once it settles. Rasterising a vector page is
+// proportional to the pixel count, so the cheap tier is roughly an order of
+// magnitude less work and keeps scrolling responsive.
+export const SCROLL_PREVIEW_DIMENSION = 400;
+export const SETTLED_PREVIEW_DIMENSION = 1400;
+
 let pdfjsPromise = null;
 
 export function isPdfFile(file) {
@@ -46,18 +53,31 @@ export function pageRenderScale(viewport, maxEdge = MAX_RENDER_DIMENSION) {
   return Math.min(1, maxEdge / longEdge);
 }
 
-export async function renderPdfPageToBlob(doc, pageNumber, {
+/**
+ * Rasterise `pageNumber` onto an existing canvas, sized to `maxEdge` on its long
+ * edge. Returns the task object PDF.js exposes so a caller can `cancel()` a
+ * render that a newer one has superseded; cancelling rejects with
+ * `RenderingCancelledException`, which callers should treat as "ignore me".
+ */
+export async function renderPdfPageToCanvas(doc, pageNumber, canvas, {
   maxEdge = MAX_RENDER_DIMENSION,
-  createCanvas = () => document.createElement('canvas'),
 } = {}) {
   const page = await doc.getPage(pageNumber);
   const scale = pageRenderScale(page.getViewport({ scale: 1 }), maxEdge);
   const viewport = page.getViewport({ scale });
 
-  const canvas = createCanvas();
   canvas.width = Math.max(1, Math.ceil(viewport.width));
   canvas.height = Math.max(1, Math.ceil(viewport.height));
-  await page.render({ canvasContext: canvas.getContext('2d'), viewport }).promise;
+
+  return page.render({ canvasContext: canvas.getContext('2d'), viewport });
+}
+
+export async function renderPdfPageToBlob(doc, pageNumber, {
+  maxEdge = MAX_RENDER_DIMENSION,
+  createCanvas = () => document.createElement('canvas'),
+} = {}) {
+  const canvas = createCanvas();
+  await renderPdfPageToCanvas(doc, pageNumber, canvas, { maxEdge }).promise;
 
   return new Promise((resolve, reject) => {
     canvas.toBlob((blob) => {

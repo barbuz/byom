@@ -18,6 +18,10 @@ const pdfMocks = vi.hoisted(() => ({
   isPdfFile: vi.fn(() => false),
   loadPdf: vi.fn(),
   renderPdfPageToBlob: vi.fn(async () => new Blob(['png'], { type: 'image/png' })),
+  // The real PdfPagePicker is rendered here, so the preview API must exist.
+  renderPdfPageToCanvas: vi.fn(async () => ({ promise: Promise.resolve(), cancel: () => {} })),
+  SCROLL_PREVIEW_DIMENSION: 400,
+  SETTLED_PREVIEW_DIMENSION: 1400,
 }));
 
 vi.mock('./lib/pdf.js', () => pdfMocks);
@@ -365,8 +369,8 @@ describe('MapList PDF uploads', () => {
     const dialog = await screen.findByRole('dialog');
     expect(dialog.textContent).toContain('5');
 
-    const pageInput = screen.getByRole('spinbutton');
-    await fireEvent.input(pageInput, { target: { value: '3' } });
+    await fireEvent.click(screen.getByRole('button', { name: /next page/i }));
+    await fireEvent.click(screen.getByRole('button', { name: /next page/i }));
     await fireEvent.click(screen.getByRole('button', { name: /import page/i }));
 
     await waitFor(() => expect(dbMocks.addMap).toHaveBeenCalled());

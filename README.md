@@ -34,7 +34,7 @@ For detailed setup instructions, see [QUICKSTART.md](QUICKSTART.md)
 ## 📖 How It Works
 
 ### 1. Add a Map
-On the landing page, use the camera or file upload to add a map image or PDF. A PDF is rasterised to an image when you add it; if it has more than one page you are asked which page to import. Everything is stored locally in IndexedDB.
+On the landing page, use the camera or file upload to add a map image or PDF. A PDF is rasterised to an image when you add it; if it has more than one page, a preview with a page slider lets you pick the right one. Everything is stored locally in IndexedDB.
 
 ### 2. Add Reference Points
 Select at least 2 reference points by:

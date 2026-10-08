@@ -3,6 +3,7 @@
   import { getAllMaps, getAllReferencePoints, addMap, deleteMap } from './lib/db.js';
   import { createPositionWatch } from './lib/geolocation.js';
   import { isPdfFile, loadPdf, renderPdfPageToBlob } from './lib/pdf.js';
+  import PdfPagePicker from './components/PdfPagePicker.svelte';
   import {
     DEFAULT_DIRECTION,
     DEFAULT_SORT,
@@ -206,7 +207,7 @@
     let pageNumber = 1;
     if (pageCount > 1) {
       // Only ask when there is a genuine choice; a single-page PDF is silent.
-      pageNumber = await choosePdfPage(file.name, pageCount);
+      pageNumber = await choosePdfPage(file.name, pageCount, doc);
       if (!pageNumber) return null;
     }
 
@@ -217,14 +218,14 @@
     return { blob, name: `${file.name}${suffix}` };
   }
 
-  function choosePdfPage(name, pageCount) {
+  function choosePdfPage(name, pageCount, doc) {
     return new Promise((resolve) => {
-      pdfPicker = { name, pageCount, page: 1, resolve };
+      pdfPicker = { name, pageCount, doc, resolve };
     });
   }
 
-  function confirmPdfPage() {
-    const { page, pageCount, resolve } = pdfPicker;
+  function confirmPdfPage(page) {
+    const { pageCount, resolve } = pdfPicker;
     pdfPicker = null;
     const clamped = Math.min(pageCount, Math.max(1, Math.trunc(Number(page)) || 1));
     resolve(clamped);
@@ -329,26 +330,13 @@
   </div>
 
   {#if pdfPicker}
-    <div class="modal-backdrop">
-      <div class="modal" role="dialog" aria-modal="true" aria-labelledby="pdf-page-title">
-        <h2 id="pdf-page-title">Choose a page</h2>
-        <p class="modal-subtitle">{pdfPicker.name} has {pdfPicker.pageCount} pages.</p>
-        <label class="modal-field">
-          Page
-          <input
-            type="number"
-            min="1"
-            max={pdfPicker.pageCount}
-            bind:value={pdfPicker.page}
-          />
-          of {pdfPicker.pageCount}
-        </label>
-        <div class="modal-actions">
-          <button class="menu-item" onclick={cancelPdfPage}>Cancel</button>
-          <button class="menu-item primary" onclick={confirmPdfPage}>Import page</button>
-        </div>
-      </div>
-    </div>
+    <PdfPagePicker
+      doc={pdfPicker.doc}
+      name={pdfPicker.name}
+      pageCount={pdfPicker.pageCount}
+      onconfirm={confirmPdfPage}
+      oncancel={cancelPdfPage}
+    />
   {/if}
 
   {#if loading}
