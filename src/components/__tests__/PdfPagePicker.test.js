@@ -276,21 +276,21 @@ describe('PdfPagePicker', () => {
     );
   });
 
-  it('renders straight onto a canvas attached to the preview stage', async () => {
+  it('renders straight onto the canvas shown in the preview frame', async () => {
     // Size whatever canvas the component provides, as the real rasteriser does.
     pdfMocks.renderPdfPageToCanvas.mockImplementationOnce(async (doc, page, canvas) =>
       taskOn(canvas)
     );
 
     const { container } = setup();
-    const stage = container.querySelector('.pdf-preview-stage');
+    const frame = container.querySelector('.pdf-preview-frame');
 
-    await waitFor(() => expect(stage.querySelector('canvas')).not.toBeNull());
-    const canvas = stage.querySelector('canvas');
+    await waitFor(() => expect(frame.querySelector('canvas')).not.toBeNull());
+    const canvas = frame.querySelector('canvas');
     expect(canvas.classList.contains('pdf-preview')).toBe(true);
     expect(canvas.width).toBe(800);
     expect(canvas.height).toBe(600);
-    // PDF.js paints the attached canvas itself; there is no later copy step.
+    // PDF.js paints the shown canvas itself; there is no later copy step.
     expect(pdfMocks.renderPdfPageToCanvas.mock.calls[0][2]).toBe(canvas);
   });
 
@@ -300,18 +300,18 @@ describe('PdfPagePicker', () => {
 
     const { container } = setup();
     await vi.runOnlyPendingTimersAsync();
-    const stage = container.querySelector('.pdf-preview-stage');
-    const first = stage.querySelector('canvas');
+    const frame = container.querySelector('.pdf-preview-frame');
+    const first = frame.querySelector('canvas');
 
     const slider = screen.getByRole('slider');
     await fireEvent.input(slider, { target: { value: '2' } });
     await vi.advanceTimersByTimeAsync(200);
     await vi.runOnlyPendingTimersAsync();
 
-    const second = stage.querySelector('canvas');
+    const second = frame.querySelector('canvas');
     expect(second).not.toBe(first);
     // Only the newest canvas stays mounted.
-    expect(stage.querySelectorAll('canvas').length).toBe(1);
+    expect(frame.querySelectorAll('canvas').length).toBe(1);
 
     vi.useRealTimers();
   });
