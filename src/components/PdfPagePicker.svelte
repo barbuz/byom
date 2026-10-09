@@ -1,5 +1,4 @@
 <script>
-  import { PREVIEW_DIMENSION } from '../lib/pdf.js';
   import PdfPagePreview from './PdfPagePreview.svelte';
   import '../styles/PdfPagePicker.css';
 
@@ -18,13 +17,21 @@
   }
 </script>
 
-<div class="modal-backdrop">
-  <div class="modal pdf-modal" role="dialog" aria-modal="true" aria-labelledby="pdf-page-title">
+<div
+  class="modal-backdrop"
+  role="dialog"
+  aria-modal="true"
+  aria-labelledby="pdf-page-title"
+  tabindex="-1"
+  onclick={(e) => { if (e.target === e.currentTarget) oncancel(); }}
+  onkeydown={(e) => { if (e.key === 'Escape') oncancel(); }}
+>
+  <div class="modal pdf-modal">
     <h2 id="pdf-page-title">Choose a page</h2>
     <p class="modal-subtitle">{name} has {pageCount} pages.</p>
 
     <div class="pdf-preview-frame">
-      <PdfPagePreview {doc} {page} maxEdge={PREVIEW_DIMENSION} />
+      <PdfPagePreview {doc} {page} />
     </div>
 
     <div class="pdf-controls">

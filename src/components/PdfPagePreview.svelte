@@ -1,8 +1,8 @@
 <script>
   import { untrack } from 'svelte';
-  import { renderPdfPageToCanvas } from '../lib/pdf.js';
+  import { PREVIEW_DIMENSION, renderPdfPageToCanvas } from '../lib/pdf.js';
 
-  let { doc, page, maxEdge } = $props();
+  let { doc, page } = $props();
 
   // Wait for the page to hold still before rasterising it. Sliding the slider
   // fires an input event per position, and rasterising a page costs roughly
@@ -12,7 +12,9 @@
 
   // The page the canvas is keyed to. It trails `page` by the debounce, so a fast
   // drag leaves the key unchanged and not a single intermediate page is drawn.
-  let renderPage = $state(page);
+  // `untrack` states the intent that only the debounce effect below moves this;
+  // a bare `$state(page)` reads as a one-time snapshot of the prop.
+  let renderPage = $state(untrack(() => page));
   let failed = $state(false);
   let canvasEl = $state(null);
 
@@ -40,7 +42,7 @@
     let cancelled = false;
     let task = null;
 
-    renderPdfPageToCanvas(doc, target, canvas, { maxEdge })
+    renderPdfPageToCanvas(doc, target, canvas, { maxEdge: PREVIEW_DIMENSION })
       .then((started) => {
         task = started;
         return started.promise;
@@ -57,15 +59,21 @@
   });
 </script>
 
-<!-- A fresh canvas per page. PDF.js forbids a canvas shared by two renders, and
-     a superseded render can still be starting when the next one begins, but a
-     recreated element shares no state with it, so that collision cannot happen.
-     Painting straight onto the canvas also lets PDF.js draw in stages, so the
-     preview fills in as it goes instead of waiting for a finished page. -->
-{#key renderPage}
-  <canvas class="pdf-preview" bind:this={canvasEl}></canvas>
-{/key}
+<!-- One root, owned by this component, so it is a single flex item in the
+     parent's preview frame and the error sits under the canvas instead of
+     competing with it. -->
+<div class="pdf-preview-stage">
+  <!-- A fresh canvas per page. PDF.js forbids a canvas shared by two renders,
+       and a superseded render can still be starting when the next one begins,
+       but a recreated element shares no state with it, so that collision cannot
+       happen. Painting straight onto the canvas also lets PDF.js draw in
+       stages, so the preview fills in as it goes instead of waiting for a
+       finished page. -->
+  {#key renderPage}
+    <canvas class="pdf-preview" bind:this={canvasEl}></canvas>
+  {/key}
 
-{#if failed}
-  <p class="pdf-preview-error">Could not preview this page.</p>
-{/if}
+  {#if failed}
+    <p class="pdf-preview-error">Could not preview this page.</p>
+  {/if}
+</div>

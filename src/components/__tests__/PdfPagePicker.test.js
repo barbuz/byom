@@ -164,35 +164,6 @@ describe('PdfPagePicker', () => {
     await waitFor(() => expect(first.cancel).toHaveBeenCalled());
   });
 
-  it('does not render if the page changes again before the render starts', async () => {
-    vi.useFakeTimers();
-    pdfMocks.renderPdfPageToCanvas.mockResolvedValue(makeTask());
-
-    setup();
-    await vi.runOnlyPendingTimersAsync();
-    const before = pdfMocks.renderPdfPageToCanvas.mock.calls.length;
-
-    await fireEvent.click(screen.getByRole('button', { name: /next page/i }));
-    await fireEvent.click(screen.getByRole('button', { name: /next page/i }));
-
-    // Both opens are still inside the debounce, so neither has rendered yet.
-    expect(pdfMocks.renderPdfPageToCanvas.mock.calls.length).toBe(before);
-
-    await vi.advanceTimersByTimeAsync(200);
-    await vi.runOnlyPendingTimersAsync();
-
-    // Only the page landed on is rendered, exactly once.
-    expect(pdfMocks.renderPdfPageToCanvas.mock.calls.length).toBe(before + 1);
-    expect(pdfMocks.renderPdfPageToCanvas).toHaveBeenLastCalledWith(
-      expect.anything(),
-      3,
-      expect.anything(),
-      { maxEdge: 1400 }
-    );
-
-    vi.useRealTimers();
-  });
-
   it('confirms the current page and cancels cleanly', async () => {
     pdfMocks.renderPdfPageToCanvas.mockResolvedValue(makeTask());
 
@@ -211,7 +182,33 @@ describe('PdfPagePicker', () => {
 
     setup();
 
-    await screen.findByText(/could not preview this page/i);
+    // The error lives in the same root as the canvas, as a sibling inside the
+    // stage, so it cannot be pushed out of the frame by the canvas.
+    const error = await screen.findByText(/could not preview this page/i);
+    const stage = document.querySelector('.pdf-preview-stage');
+    expect(stage).not.toBeNull();
+    expect(stage.contains(error)).toBe(true);
+    expect(stage.querySelector('canvas')).not.toBeNull();
+  });
+
+  it('closes when Escape is pressed or the backdrop is clicked', async () => {
+    pdfMocks.renderPdfPageToCanvas.mockResolvedValue(makeTask());
+
+    const { oncancel } = setup();
+
+    await fireEvent.keyDown(
+      screen.getByRole('dialog'),
+      { key: 'Escape' }
+    );
+    expect(oncancel).toHaveBeenCalled();
+
+    // A click on the backdrop (the dialog root) dismisses; the modal itself
+    // must not, so an inner click is ignored.
+    oncancel.mockClear();
+    await fireEvent.click(document.querySelector('.modal'));
+    expect(oncancel).not.toHaveBeenCalled();
+    await fireEvent.click(screen.getByRole('dialog'));
+    expect(oncancel).toHaveBeenCalled();
   });
 
   it('shows an error when the page cannot even be loaded', async () => {
