@@ -19,12 +19,12 @@
 
   let page = $state(1);
   let previewFailed = $state(false);
-  let canvasEl = $state(null);
+  let previewStage = $state(null);
 
   $effect(() => {
-    const visible = canvasEl;
+    const stage = previewStage;
     const target = page;
-    if (!visible) return;
+    if (!stage) return;
 
     // A new page supersedes any error from the previous one straight away, even
     // while the render itself is still waiting out the debounce.
@@ -36,23 +36,22 @@
     const timer = setTimeout(() => {
       if (cancelled) return;
 
-      // Render onto a private canvas and copy the finished page across. PDF.js
-      // rejects a canvas shared by two renders, and a superseded render can
-      // still be starting when the next one begins, so giving each render its
-      // own canvas removes that shared state. The copy happens only once a
-      // render succeeds, so the visible canvas keeps the last good page until
-      // the next one is ready.
-      const scratch = document.createElement('canvas');
-      renderPdfPageToCanvas(doc, target, scratch, { maxEdge: PREVIEW_DIMENSION })
+      // Each render gets a brand-new canvas element, attached before it paints.
+      // PDF.js tracks a canvas in a WeakSet and refuses a second render while
+      // one is still in flight on it; a superseded render can still be starting
+      // (getPage is async, so there is no task to cancel yet), but a new element
+      // shares no state with it, so that collision cannot happen. Painting
+      // directly into the attached canvas lets PDF.js draw the page in stages
+      // (background, then text and images) so the preview fills in as it goes,
+      // instead of staying blank until a finished copy is swapped in.
+      const canvas = document.createElement('canvas');
+      canvas.className = 'pdf-preview';
+      stage.replaceChildren(canvas);
+
+      renderPdfPageToCanvas(doc, target, canvas, { maxEdge: PREVIEW_DIMENSION })
         .then((started) => {
           task = started;
           return started.promise;
-        })
-        .then(() => {
-          if (cancelled) return;
-          visible.width = scratch.width;
-          visible.height = scratch.height;
-          visible.getContext('2d').drawImage(scratch, 0, 0);
         })
         .catch(() => {
           // A render we cancelled is not a failure; only a genuine error is.
@@ -78,7 +77,8 @@
     <p class="modal-subtitle">{name} has {pageCount} pages.</p>
 
     <div class="pdf-preview-frame">
-      <canvas class="pdf-preview" bind:this={canvasEl}></canvas>
+      <!-- Empty and untouched by Svelte, so each render can swap its canvas in. -->
+      <div class="pdf-preview-stage" bind:this={previewStage}></div>
       {#if previewFailed}
         <p class="pdf-preview-error">Could not preview this page.</p>
       {/if}

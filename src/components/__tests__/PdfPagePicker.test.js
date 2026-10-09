@@ -276,21 +276,43 @@ describe('PdfPagePicker', () => {
     );
   });
 
-  it('copies a finished page onto the visible canvas', async () => {
-    // Size and "draw onto" whatever canvas the component provides, as the real
-    // rasteriser does, so the copy step has something to move across.
+  it('renders straight onto a canvas attached to the preview stage', async () => {
+    // Size whatever canvas the component provides, as the real rasteriser does.
     pdfMocks.renderPdfPageToCanvas.mockImplementationOnce(async (doc, page, canvas) =>
       taskOn(canvas)
     );
 
     const { container } = setup();
-    const visible = container.querySelector('canvas');
+    const stage = container.querySelector('.pdf-preview-stage');
 
-    await waitFor(() => expect(visible.width).toBe(800));
-    expect(visible.height).toBe(600);
-    const scratch = pdfMocks.renderPdfPageToCanvas.mock.calls[0][2];
-    expect(globalThis.__canvasTestUtil.getCtxCalls()).toEqual(
-      expect.arrayContaining([['drawImage', [scratch, 0, 0]]])
-    );
+    await waitFor(() => expect(stage.querySelector('canvas')).not.toBeNull());
+    const canvas = stage.querySelector('canvas');
+    expect(canvas.classList.contains('pdf-preview')).toBe(true);
+    expect(canvas.width).toBe(800);
+    expect(canvas.height).toBe(600);
+    // PDF.js paints the attached canvas itself; there is no later copy step.
+    expect(pdfMocks.renderPdfPageToCanvas.mock.calls[0][2]).toBe(canvas);
+  });
+
+  it('swaps in a fresh canvas element for each page so renders never share one', async () => {
+    vi.useFakeTimers();
+    pdfMocks.renderPdfPageToCanvas.mockResolvedValue(makeTask());
+
+    const { container } = setup();
+    await vi.runOnlyPendingTimersAsync();
+    const stage = container.querySelector('.pdf-preview-stage');
+    const first = stage.querySelector('canvas');
+
+    const slider = screen.getByRole('slider');
+    await fireEvent.input(slider, { target: { value: '2' } });
+    await vi.advanceTimersByTimeAsync(200);
+    await vi.runOnlyPendingTimersAsync();
+
+    const second = stage.querySelector('canvas');
+    expect(second).not.toBe(first);
+    // Only the newest canvas stays mounted.
+    expect(stage.querySelectorAll('canvas').length).toBe(1);
+
+    vi.useRealTimers();
   });
 });

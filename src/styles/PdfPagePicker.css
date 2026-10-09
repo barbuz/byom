@@ -47,6 +47,12 @@
   overflow: hidden;
 }
 
+/* The stage is only a mount point for the per-render canvas; `display: contents`
+   lets that canvas be the flex item, so it centres exactly as before. */
+.pdf-preview-stage {
+  display: contents;
+}
+
 .pdf-preview {
   max-width: 100%;
   max-height: 100%;
