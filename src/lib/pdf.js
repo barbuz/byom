@@ -7,12 +7,10 @@
 // memory on phones.
 export const MAX_RENDER_DIMENSION = 3000;
 
-// Two preview tiers for the page picker: a cheap pass drawn while the slider
-// moves, and a detailed pass once it settles. Rasterising a vector page is
-// proportional to the pixel count, so the cheap tier is roughly an order of
-// magnitude less work and keeps scrolling responsive.
-export const SCROLL_PREVIEW_DIMENSION = 400;
-export const SETTLED_PREVIEW_DIMENSION = 1400;
+// Long-edge cap for the page picker's preview: sharp enough to read a page and
+// confirm it is the right one, below the import cap so a drag across a long
+// document stays responsive.
+export const PREVIEW_DIMENSION = 1400;
 
 let pdfjsPromise = null;
 
@@ -58,6 +56,11 @@ export function pageRenderScale(viewport, maxEdge = MAX_RENDER_DIMENSION) {
  * edge. Returns the task object PDF.js exposes so a caller can `cancel()` a
  * render that a newer one has superseded; cancelling rejects with
  * `RenderingCancelledException`, which callers should treat as "ignore me".
+ *
+ * PDF.js forbids a canvas being used by two renders at once and rejects with
+ * "Cannot use the same canvas during multiple render() operations" otherwise,
+ * so a caller reusing one canvas must `cancel()` the previous task first.
+ * `cancel()` frees the canvas synchronously; the rejected promise settles later.
  */
 export async function renderPdfPageToCanvas(doc, pageNumber, canvas, {
   maxEdge = MAX_RENDER_DIMENSION,

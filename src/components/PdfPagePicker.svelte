@@ -1,9 +1,5 @@
 <script>
-  import {
-    SCROLL_PREVIEW_DIMENSION,
-    SETTLED_PREVIEW_DIMENSION,
-    renderPdfPageToCanvas,
-  } from '../lib/pdf.js';
+  import { PREVIEW_DIMENSION, renderPdfPageToCanvas } from '../lib/pdf.js';
   import '../styles/PdfPagePicker.css';
 
   let {
@@ -14,76 +10,53 @@
     oncancel,
   } = $props();
 
-  // Delay after the last slider move before the detailed render starts. Long
-  // enough to cover a flick, short enough to feel immediate on release.
-  const SETTLE_DELAY_MS = 250;
-
   let page = $state(1);
-  // 'scrolling' draws the cheap preview; 'settled' draws the detailed one.
-  let phase = $state('settled');
   let previewFailed = $state(false);
   let canvasEl = $state(null);
 
-  // Not $state: these are bookkeeping for the render effect, never rendered.
-  let settleTimer = null;
-
-  const maxEdge = $derived(
-    phase === 'scrolling' ? SCROLL_PREVIEW_DIMENSION : SETTLED_PREVIEW_DIMENSION,
-  );
-
   $effect(() => {
-    const el = canvasEl;
+    const visible = canvasEl;
     const target = page;
-    const edge = maxEdge;
-    if (!el) return;
+    if (!visible) return;
 
     let cancelled = false;
     let task = null;
 
-    // A previous page may have failed; give this one a clean slate.
+    // Render onto a private canvas and copy the finished page across. PDF.js
+    // rejects a canvas shared by two renders, and when the slider moves quickly
+    // a superseded render can still be starting — its task is created only after
+    // `getPage` resolves, which may be after the next page's render has begun.
+    // Giving each render its own canvas removes that shared state, so a fast
+    // drag can never make PDF.js fail the current preview. The copy happens only
+    // once a render succeeds, so the visible canvas keeps the last good page
+    // until the next one is ready.
+    const scratch = document.createElement('canvas');
     previewFailed = false;
 
-    renderPdfPageToCanvas(doc, target, el, { maxEdge: edge })
+    renderPdfPageToCanvas(doc, target, scratch, { maxEdge: PREVIEW_DIMENSION })
       .then((started) => {
         task = started;
-        return started.promise.catch(() => {
-          if (!cancelled) previewFailed = true;
-        });
+        return started.promise;
+      })
+      .then(() => {
+        if (cancelled) return;
+        visible.width = scratch.width;
+        visible.height = scratch.height;
+        visible.getContext('2d').drawImage(scratch, 0, 0);
       })
       .catch(() => {
+        // A render we cancelled is not a failure; only a genuine error is.
         if (!cancelled) previewFailed = true;
       });
 
     return () => {
-      // A newer page/phase supersedes this render; cancelling keeps only the
-      // latest pass on the main thread.
       cancelled = true;
       if (task) task.cancel();
     };
   });
 
-  $effect(() => () => clearTimeout(settleTimer));
-
-  function goToPage(next, { settleNow = true } = {}) {
+  function goToPage(next) {
     page = Math.min(pageCount, Math.max(1, next));
-    if (settleNow) {
-      clearTimeout(settleTimer);
-      phase = 'settled';
-    }
-  }
-
-  function handleSlide(event) {
-    goToPage(Number(event.target.value), { settleNow: false });
-    phase = 'scrolling';
-    clearTimeout(settleTimer);
-    settleTimer = setTimeout(() => {
-      phase = 'settled';
-    }, SETTLE_DELAY_MS);
-  }
-
-  function handleSettle() {
-    clearTimeout(settleTimer);
-    phase = 'settled';
   }
 </script>
 
@@ -109,8 +82,7 @@
         min="1"
         max={pageCount}
         value={page}
-        oninput={handleSlide}
-        onchange={handleSettle}
+        oninput={(e) => goToPage(Number(e.target.value))}
         aria-label="Page"
       />
       <button class="pdf-nav" onclick={() => goToPage(page + 1)} disabled={page >= pageCount} aria-label="Next page">

@@ -1,8 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   MAX_RENDER_DIMENSION,
-  SETTLED_PREVIEW_DIMENSION,
-  SCROLL_PREVIEW_DIMENSION,
+  PREVIEW_DIMENSION,
   isPdfFile,
   loadPdf,
   pageRenderScale,
@@ -69,9 +68,9 @@ describe('renderPdfPageToCanvas', () => {
   });
 });
 
-describe('preview tiers', () => {
-  it('orders the scroll preview below the settled preview', () => {
-    expect(SCROLL_PREVIEW_DIMENSION).toBeLessThan(SETTLED_PREVIEW_DIMENSION);
+describe('preview dimension', () => {
+  it('stays below the import cap so a drag stays responsive', () => {
+    expect(PREVIEW_DIMENSION).toBeLessThan(MAX_RENDER_DIMENSION);
   });
 });
 

@@ -20,8 +20,7 @@ const pdfMocks = vi.hoisted(() => ({
   renderPdfPageToBlob: vi.fn(async () => new Blob(['png'], { type: 'image/png' })),
   // The real PdfPagePicker is rendered here, so the preview API must exist.
   renderPdfPageToCanvas: vi.fn(async () => ({ promise: Promise.resolve(), cancel: () => {} })),
-  SCROLL_PREVIEW_DIMENSION: 400,
-  SETTLED_PREVIEW_DIMENSION: 1400,
+  PREVIEW_DIMENSION: 1400,
 }));
 
 vi.mock('./lib/pdf.js', () => pdfMocks);
