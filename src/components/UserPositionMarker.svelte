@@ -1,4 +1,5 @@
 <script>
+  import { onMount } from 'svelte';
   import { drawUserMarker } from '../lib/draw.js';
   import { createPositionWatch } from '../lib/geolocation.js';
 
@@ -18,7 +19,7 @@
   // Expose state to parent
   export { userPosition, positionStale };
 
-  $effect(() => {
+  onMount(() => {
     const watch = createPositionWatch({
       onChange: (position) => {
         userPosition = position;

@@ -1,5 +1,5 @@
 <script>
-  import { untrack } from 'svelte';
+  import { onMount } from 'svelte';
   import { getAllMaps, getAllReferencePoints, addMap, deleteMap } from './lib/db.js';
   import { createPositionWatch } from './lib/geolocation.js';
   import { isPdfFile, loadPdf, renderPdfPageToBlob } from './lib/pdf.js';
@@ -47,11 +47,9 @@
   // in README.md).
   const APP_VERSION = __APP_VERSION__;
 
-  $effect(() => {
-    untrack(() => loadMaps());
-  });
+  onMount(loadMaps);
 
-  $effect(() => {
+  onMount(() => {
     const watch = createPositionWatch({
       onChange: (position) => {
         // While the page is hidden, leave the classification alone; the next

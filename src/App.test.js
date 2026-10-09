@@ -43,5 +43,26 @@ describe("App", () => {
     await screen.findByText(/← Back/);
     expect(dbMocks.getMap).toHaveBeenCalledWith(1);
   });
+
+  it("reloads the viewer when the hash changes to another map", async () => {
+    // Deep-linking from one map to another without a hash-less hop must reload
+    // the viewer; a one-shot load would leave the previous map on screen.
+    dbMocks.getMap.mockImplementation(async (id) => ({
+      id,
+      name: `Map ${id}`,
+      imageBlob: { blob: true },
+    }));
+
+    window.location.hash = "#map/1";
+    render(App);
+    await screen.findByText(/← Back/);
+    expect(dbMocks.getMap).toHaveBeenCalledWith(1);
+
+    dbMocks.getMap.mockClear();
+    window.location.hash = "#map/2";
+    window.dispatchEvent(new Event("hashchange"));
+
+    await vi.waitFor(() => expect(dbMocks.getMap).toHaveBeenCalledWith(2));
+  });
 });
 
