@@ -28,6 +28,15 @@ function taskOn(canvas, { width = 800, height = 600 } = {}) {
   };
 }
 
+/** A task whose render rejects. The promise is marked handled here because the
+ *  component attaches its own handler only after the debounce; without this the
+ *  rejection is reported as unhandled before then. */
+function failingTask(message) {
+  const promise = Promise.reject(new Error(message));
+  promise.catch(() => {});
+  return { promise, cancel: vi.fn() };
+}
+
 function setup(props = {}) {
   const onconfirm = vi.fn();
   const oncancel = vi.fn();
@@ -87,30 +96,59 @@ describe('PdfPagePicker', () => {
     expect(screen.getByRole('button', { name: /next page/i }).disabled).toBe(true);
   });
 
-  it('renders each page on its own canvas so a fast drag cannot share one', async () => {
+  it('skips the pages a fast drag flies past and renders only the final one', async () => {
+    vi.useFakeTimers();
     pdfMocks.renderPdfPageToCanvas.mockResolvedValue(makeTask());
 
     setup();
-    await waitFor(() => expect(pdfMocks.renderPdfPageToCanvas).toHaveBeenCalled());
+    await vi.runOnlyPendingTimersAsync();
+    expect(pdfMocks.renderPdfPageToCanvas).toHaveBeenCalledTimes(1);
+
+    const slider = screen.getByRole('slider');
+    // Every remaining position in quick succession, faster than the debounce.
+    for (const value of ['2', '3', '4', '5']) {
+      await fireEvent.input(slider, { target: { value } });
+    }
+    // Nothing has been rendered yet: the intermediate pages were never started.
+    expect(pdfMocks.renderPdfPageToCanvas).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(200);
+    await vi.runOnlyPendingTimersAsync();
+
+    // Exactly one more render, for the page the user stopped on.
+    expect(pdfMocks.renderPdfPageToCanvas).toHaveBeenCalledTimes(2);
+    expect(pdfMocks.renderPdfPageToCanvas).toHaveBeenLastCalledWith(
+      expect.anything(),
+      5,
+      expect.anything(),
+      { maxEdge: 1400 }
+    );
+
+    vi.useRealTimers();
+  });
+
+  it('gives each render its own canvas so a fast drag cannot share one', async () => {
+    vi.useFakeTimers();
+    pdfMocks.renderPdfPageToCanvas.mockResolvedValue(makeTask());
+
+    setup();
+    await vi.runOnlyPendingTimersAsync();
 
     const slider = screen.getByRole('slider');
     await fireEvent.input(slider, { target: { value: '2' } });
+    await vi.advanceTimersByTimeAsync(200);
     await fireEvent.input(slider, { target: { value: '3' } });
+    await vi.advanceTimersByTimeAsync(200);
     await fireEvent.input(slider, { target: { value: '4' } });
-
-    await waitFor(() =>
-      expect(pdfMocks.renderPdfPageToCanvas).toHaveBeenLastCalledWith(
-        expect.anything(),
-        4,
-        expect.anything(),
-        { maxEdge: 1400 }
-      )
-    );
+    await vi.advanceTimersByTimeAsync(200);
 
     // PDF.js rejects a canvas used by two renders at once; the picker never
     // reuses one, which is what caused spurious failures while sliding.
     const canvases = pdfMocks.renderPdfPageToCanvas.mock.calls.map((c) => c[2]);
+    expect(canvases.length).toBeGreaterThan(1);
     expect(new Set(canvases).size).toBe(canvases.length);
+
+    vi.useRealTimers();
   });
 
   it('cancels the in-flight render when the page changes', async () => {
@@ -124,6 +162,35 @@ describe('PdfPagePicker', () => {
     await fireEvent.click(screen.getByRole('button', { name: /next page/i }));
 
     await waitFor(() => expect(first.cancel).toHaveBeenCalled());
+  });
+
+  it('does not render if the page changes again before the render starts', async () => {
+    vi.useFakeTimers();
+    pdfMocks.renderPdfPageToCanvas.mockResolvedValue(makeTask());
+
+    setup();
+    await vi.runOnlyPendingTimersAsync();
+    const before = pdfMocks.renderPdfPageToCanvas.mock.calls.length;
+
+    await fireEvent.click(screen.getByRole('button', { name: /next page/i }));
+    await fireEvent.click(screen.getByRole('button', { name: /next page/i }));
+
+    // Both opens are still inside the debounce, so neither has rendered yet.
+    expect(pdfMocks.renderPdfPageToCanvas.mock.calls.length).toBe(before);
+
+    await vi.advanceTimersByTimeAsync(200);
+    await vi.runOnlyPendingTimersAsync();
+
+    // Only the page landed on is rendered, exactly once.
+    expect(pdfMocks.renderPdfPageToCanvas.mock.calls.length).toBe(before + 1);
+    expect(pdfMocks.renderPdfPageToCanvas).toHaveBeenLastCalledWith(
+      expect.anything(),
+      3,
+      expect.anything(),
+      { maxEdge: 1400 }
+    );
+
+    vi.useRealTimers();
   });
 
   it('confirms the current page and cancels cleanly', async () => {
@@ -140,8 +207,7 @@ describe('PdfPagePicker', () => {
   });
 
   it('shows an error when the preview render fails', async () => {
-    const failing = { promise: Promise.reject(new Error('boom')), cancel: vi.fn() };
-    pdfMocks.renderPdfPageToCanvas.mockResolvedValue(failing);
+    pdfMocks.renderPdfPageToCanvas.mockResolvedValue(failingTask('boom'));
 
     setup();
 
@@ -159,10 +225,7 @@ describe('PdfPagePicker', () => {
   it('does not report an error when a superseded render is cancelled', async () => {
     // A render cancelled because the user moved on rejects with a cancellation
     // error; that is not a preview failure and must not surface as one.
-    const cancelled = {
-      promise: Promise.reject(new Error('Rendering cancelled')),
-      cancel: vi.fn(),
-    };
+    const cancelled = failingTask('Rendering cancelled');
     pdfMocks.renderPdfPageToCanvas.mockResolvedValueOnce(cancelled);
     pdfMocks.renderPdfPageToCanvas.mockResolvedValue(makeTask());
 
@@ -179,9 +242,8 @@ describe('PdfPagePicker', () => {
   });
 
   it('recovers from a failed preview when another page is chosen', async () => {
-    const failing = { promise: Promise.reject(new Error('boom')), cancel: vi.fn() };
-    pdfMocks.renderPdfPageToCanvas.mockResolvedValue(failing);
-    pdfMocks.renderPdfPageToCanvas.mockResolvedValueOnce(failing);
+    pdfMocks.renderPdfPageToCanvas.mockResolvedValue(failingTask('boom'));
+    pdfMocks.renderPdfPageToCanvas.mockResolvedValueOnce(failingTask('boom'));
 
     setup();
     await screen.findByText(/could not preview this page/i);

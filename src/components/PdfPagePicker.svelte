@@ -10,6 +10,13 @@
     oncancel,
   } = $props();
 
+  // Wait for the page to hold still before rasterising it. Sliding the slider
+  // fires an input event per position, and rasterising a page costs roughly
+  // 0.1 s, so rendering every position would queue a run for each page the user
+  // flies past. A short pause means intermediate pages are skipped entirely and
+  // only the page the user lands on is ever drawn.
+  const PREVIEW_DEBOUNCE_MS = 120;
+
   let page = $state(1);
   let previewFailed = $state(false);
   let canvasEl = $state(null);
@@ -19,38 +26,43 @@
     const target = page;
     if (!visible) return;
 
+    // A new page supersedes any error from the previous one straight away, even
+    // while the render itself is still waiting out the debounce.
+    previewFailed = false;
+
     let cancelled = false;
     let task = null;
 
-    // Render onto a private canvas and copy the finished page across. PDF.js
-    // rejects a canvas shared by two renders, and when the slider moves quickly
-    // a superseded render can still be starting — its task is created only after
-    // `getPage` resolves, which may be after the next page's render has begun.
-    // Giving each render its own canvas removes that shared state, so a fast
-    // drag can never make PDF.js fail the current preview. The copy happens only
-    // once a render succeeds, so the visible canvas keeps the last good page
-    // until the next one is ready.
-    const scratch = document.createElement('canvas');
-    previewFailed = false;
+    const timer = setTimeout(() => {
+      if (cancelled) return;
 
-    renderPdfPageToCanvas(doc, target, scratch, { maxEdge: PREVIEW_DIMENSION })
-      .then((started) => {
-        task = started;
-        return started.promise;
-      })
-      .then(() => {
-        if (cancelled) return;
-        visible.width = scratch.width;
-        visible.height = scratch.height;
-        visible.getContext('2d').drawImage(scratch, 0, 0);
-      })
-      .catch(() => {
-        // A render we cancelled is not a failure; only a genuine error is.
-        if (!cancelled) previewFailed = true;
-      });
+      // Render onto a private canvas and copy the finished page across. PDF.js
+      // rejects a canvas shared by two renders, and a superseded render can
+      // still be starting when the next one begins, so giving each render its
+      // own canvas removes that shared state. The copy happens only once a
+      // render succeeds, so the visible canvas keeps the last good page until
+      // the next one is ready.
+      const scratch = document.createElement('canvas');
+      renderPdfPageToCanvas(doc, target, scratch, { maxEdge: PREVIEW_DIMENSION })
+        .then((started) => {
+          task = started;
+          return started.promise;
+        })
+        .then(() => {
+          if (cancelled) return;
+          visible.width = scratch.width;
+          visible.height = scratch.height;
+          visible.getContext('2d').drawImage(scratch, 0, 0);
+        })
+        .catch(() => {
+          // A render we cancelled is not a failure; only a genuine error is.
+          if (!cancelled) previewFailed = true;
+        });
+    }, PREVIEW_DEBOUNCE_MS);
 
     return () => {
       cancelled = true;
+      clearTimeout(timer);
       if (task) task.cancel();
     };
   });
