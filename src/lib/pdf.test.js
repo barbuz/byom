@@ -116,6 +116,36 @@ describe('renderPdfPageToBlob', () => {
       renderPdfPageToBlob(doc, 1, { createCanvas: () => fakeCanvas(null) }),
     ).rejects.toThrow('Failed to rasterise PDF page');
   });
+
+  // The page must be drawn before the canvas is snapshotted. Resolving the
+  // render promise on a later tick (a real render is never synchronous) catches
+  // the canvas being read while it is still blank.
+  it('waits for the render before snapshotting the canvas', async () => {
+    let finishRender;
+    const page = {
+      getViewport: () => ({ width: 10, height: 10 }),
+      render: vi.fn(() => ({ promise: new Promise((r) => { finishRender = r; }) })),
+    };
+    const doc = { getPage: async () => page };
+
+    let rendered = false;
+    const canvas = {
+      width: 0,
+      height: 0,
+      getContext: () => ({}),
+      toBlob: (cb) => { rendered = true; cb('png-blob'); },
+    };
+
+    const pending = renderPdfPageToBlob(doc, 1, { createCanvas: () => canvas });
+    await Promise.resolve();
+    await Promise.resolve();
+    // Give the render a chance to complete; it has not been told to yet.
+    expect(rendered).toBe(false);
+
+    finishRender();
+    await expect(pending).resolves.toBe('png-blob');
+    expect(rendered).toBe(true);
+  });
 });
 
 describe('loadPdf', () => {
