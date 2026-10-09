@@ -313,7 +313,7 @@ describe('MapList uploads', () => {
     globalThis.Image = SizedImage;
 
     const file = new File(['data'], 'map.png', { type: 'image/png' });
-    const input = document.getElementById('file-upload');
+    const input = document.querySelector('input[type="file"]');
     Object.defineProperty(input, 'files', { value: [file], configurable: true });
 
     fireEvent.change(input);
@@ -328,7 +328,7 @@ describe('MapList uploads', () => {
 
 describe('MapList PDF uploads', () => {
   function selectFiles(files) {
-    const input = document.getElementById('file-upload');
+    const input = document.querySelector('input[type="file"]');
     Object.defineProperty(input, 'files', { value: files, configurable: true });
     fireEvent.change(input);
     return input;

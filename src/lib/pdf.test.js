@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { stubCanvasToBlob } from '../../tests/setup.js';
 import {
   MAX_RENDER_DIMENSION,
   PREVIEW_DIMENSION,
@@ -75,33 +76,25 @@ describe('preview dimension', () => {
 });
 
 describe('renderPdfPageToBlob', () => {
-  function fakeCanvas(blob) {
-    return {
-      width: 0,
-      height: 0,
-      getContext: () => ({}),
-      toBlob: (cb) => cb(blob),
-    };
-  }
-
   it('sizes the canvas from the scaled viewport and returns the blob', async () => {
     const page = {
       getViewport: ({ scale }) => ({ width: 1000 * scale, height: 500 * scale }),
       render: vi.fn(() => ({ promise: Promise.resolve() })),
     };
     const doc = { getPage: vi.fn(async () => page) };
-    const canvas = fakeCanvas('png-blob');
-
-    const blob = await renderPdfPageToBlob(doc, 2, {
-      maxEdge: 500,
-      createCanvas: () => canvas,
+    const blob = new Blob(['png'], { type: 'image/png' });
+    // The stub receives the canvas under test as its second argument.
+    stubCanvasToBlob((cb, canvas) => {
+      expect(canvas.width).toBe(500);
+      expect(canvas.height).toBe(250);
+      cb(blob);
     });
 
+    const result = await renderPdfPageToBlob(doc, 2, { maxEdge: 500 });
+
     expect(doc.getPage).toHaveBeenCalledWith(2);
-    expect(canvas.width).toBe(500);
-    expect(canvas.height).toBe(250);
     expect(page.render).toHaveBeenCalled();
-    expect(blob).toBe('png-blob');
+    expect(result).toBe(blob);
   });
 
   it('rejects when the canvas cannot produce a blob', async () => {
@@ -110,10 +103,11 @@ describe('renderPdfPageToBlob', () => {
       render: () => ({ promise: Promise.resolve() }),
     };
     const doc = { getPage: async () => page };
+    stubCanvasToBlob((cb) => cb(null));
 
-    await expect(
-      renderPdfPageToBlob(doc, 1, { createCanvas: () => fakeCanvas(null) }),
-    ).rejects.toThrow('Failed to rasterise PDF page');
+    await expect(renderPdfPageToBlob(doc, 1)).rejects.toThrow(
+      'Failed to rasterise PDF page'
+    );
   });
 
   // The page must be drawn before the canvas is snapshotted. Resolving the
@@ -127,23 +121,18 @@ describe('renderPdfPageToBlob', () => {
     };
     const doc = { getPage: async () => page };
 
-    let rendered = false;
-    const canvas = {
-      width: 0,
-      height: 0,
-      getContext: () => ({}),
-      toBlob: (cb) => { rendered = true; cb('png-blob'); },
-    };
+    let snapshotted = false;
+    stubCanvasToBlob((cb) => { snapshotted = true; cb('png-blob'); });
 
-    const pending = renderPdfPageToBlob(doc, 1, { createCanvas: () => canvas });
+    const pending = renderPdfPageToBlob(doc, 1);
     await Promise.resolve();
     await Promise.resolve();
     // Give the render a chance to complete; it has not been told to yet.
-    expect(rendered).toBe(false);
+    expect(snapshotted).toBe(false);
 
     finishRender();
     await expect(pending).resolves.toBe('png-blob');
-    expect(rendered).toBe(true);
+    expect(snapshotted).toBe(true);
   });
 });
 

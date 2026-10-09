@@ -77,9 +77,8 @@ export async function renderPdfPageToCanvas(doc, pageNumber, canvas, {
 
 export async function renderPdfPageToBlob(doc, pageNumber, {
   maxEdge = MAX_RENDER_DIMENSION,
-  createCanvas = () => document.createElement('canvas'),
 } = {}) {
-  const canvas = createCanvas();
+  const canvas = document.createElement('canvas');
   // `renderPdfPageToCanvas` is async, so it resolves to the task; unwrap that
   // before awaiting the render itself. Awaiting `.promise` on the returned
   // promise is `await undefined` and resolves immediately — before the page is

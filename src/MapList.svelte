@@ -31,6 +31,8 @@
   // `resolve` settles the promise that processFile is awaiting.
   let pdfPicker = $state(null);
 
+  let fileInput = $state(null);
+
   let userPosition = $state(null);
   let positionStale = $state(false);
   // The fix the current classification was built from; plain state, not $state,
@@ -305,7 +307,7 @@
   // because a map is often a sheet, and on Android/Chromium a non-image type in
   // `accept` is also what restores the Camera entry that `image/*` alone hides.
   function openFilePicker() {
-    document.getElementById('file-upload').click();
+    fileInput.click();
   }
 </script>
 
@@ -321,7 +323,7 @@
     </button>
 
     <input
-      id="file-upload"
+      bind:this={fileInput}
       type="file"
       accept="image/*,application/pdf"
       onchange={handleFileSelect}
