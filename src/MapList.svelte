@@ -2,6 +2,8 @@
   import { untrack } from 'svelte';
   import { getAllMaps, getAllReferencePoints, addMap, deleteMap } from './lib/db.js';
   import { createPositionWatch } from './lib/geolocation.js';
+  import { isPdfFile, loadPdf, renderPdfPageToBlob } from './lib/pdf.js';
+  import PdfPagePicker from './components/PdfPagePicker.svelte';
   import {
     DEFAULT_DIRECTION,
     DEFAULT_SORT,
@@ -24,7 +26,12 @@
 
   let summaries = $state([]);
   let loading = $state(true);
-  let showUploadMenu = $state(false);
+
+  // Pending PDF page choice. While non-null, a modal asks which page to import;
+  // `resolve` settles the promise that processFile is awaiting.
+  let pdfPicker = $state(null);
+
+  let fileInput = $state(null);
 
   let userPosition = $state(null);
   let positionStale = $state(false);
@@ -167,35 +174,72 @@
     if (!files || files.length === 0) return;
 
     for (const file of files) {
-      await processImageFile(file);
+      await processFile(file);
     }
-    
+
     await loadMaps();
     event.target.value = ''; // Reset input
   }
 
-  async function processImageFile(file) {
+  // A PDF is rasterised to a PNG up front, so from here on the flow is the same
+  // as an image upload.
+  async function processFile(file) {
     try {
-      // Create thumbnail and capture the natural dimensions
-      const { thumbnail, width, height } = await createThumbnail(file);
-      
-      // Store full image as blob
-      const mapData = {
-        name: file.name,
-        imageBlob: file,
-        thumbnail: thumbnail,
+      const source = isPdfFile(file) ? await rasterisePdf(file) : { blob: file, name: file.name };
+      if (!source) return; // page choice was cancelled
+
+      const { thumbnail, width, height } = await createThumbnail(source.blob);
+      await addMap({
+        name: source.name,
+        imageBlob: source.blob,
+        thumbnail,
         imageWidth: width,
         imageHeight: height,
-      };
-
-      await addMap(mapData);
+      });
     } catch (error) {
-      console.error('Error processing image:', error);
+      console.error('Error processing file:', error);
       alert(`Failed to process ${file.name}`);
     }
   }
 
-  async function createThumbnail(file) {
+  async function rasterisePdf(file) {
+    const doc = await loadPdf(file);
+    const pageCount = doc.numPages;
+
+    let pageNumber = 1;
+    if (pageCount > 1) {
+      // Only ask when there is a genuine choice; a single-page PDF is silent.
+      pageNumber = await choosePdfPage(file.name, pageCount, doc);
+      if (!pageNumber) return null;
+    }
+
+    const blob = await renderPdfPageToBlob(doc, pageNumber);
+    // Only a multi-page PDF needs the page in its name, so the single-page case
+    // reads exactly like the file the user picked.
+    const suffix = pageCount > 1 ? ` (page ${pageNumber}/${pageCount})` : '';
+    return { blob, name: `${file.name}${suffix}` };
+  }
+
+  function choosePdfPage(name, pageCount, doc) {
+    return new Promise((resolve) => {
+      pdfPicker = { name, pageCount, doc, resolve };
+    });
+  }
+
+  function confirmPdfPage(page) {
+    const { pageCount, resolve } = pdfPicker;
+    pdfPicker = null;
+    const clamped = Math.min(pageCount, Math.max(1, Math.trunc(Number(page)) || 1));
+    resolve(clamped);
+  }
+
+  function cancelPdfPage() {
+    const { resolve } = pdfPicker;
+    pdfPicker = null;
+    resolve(null);
+  }
+
+  async function createThumbnail(blob) {
     return new Promise((resolve, reject) => {
       const reader = new FileReader();
       reader.onload = (e) => {
@@ -236,7 +280,7 @@
         img.src = e.target.result;
       };
       reader.onerror = reject;
-      reader.readAsDataURL(file);
+      reader.readAsDataURL(blob);
     });
   }
 
@@ -257,29 +301,15 @@
     window.location.hash = `#map/${mapId}`;
   }
 
-  function handleCameraUpload() {
-    showUploadMenu = false;
-    // Create a temporary input for camera capture
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = 'image/*';
-    input.capture = 'environment';
-    input.onchange = handleFileSelect;
-    input.click();
-  }
-
-  function handleFileUpload() {
-    showUploadMenu = false;
-    // Trigger the regular file input
-    document.getElementById('file-upload').click();
-  }
-
-  function handleClickOutside() {
-    showUploadMenu = false;
+  // Open the picker directly. A single input already lets the platform offer
+  // camera and file sources in one native chooser, so a pre-menu (and any
+  // capture hint) only duplicates the platform's own choice. PDF is included
+  // because a map is often a sheet, and on Android/Chromium a non-image type in
+  // `accept` is also what restores the Camera entry that `image/*` alone hides.
+  function openFilePicker() {
+    fileInput.click();
   }
 </script>
-
-<svelte:window onclick={handleClickOutside} onkeydown={(e) => e.key === 'Escape' && handleClickOutside()}/>
 
 <div class="container">
   <header>
@@ -288,31 +318,28 @@
   </header>
 
   <div class="upload-section">
-      <div class="upload-menu-container">
-      <button class="upload-btn" onclick={(e) => { e.stopPropagation(); showUploadMenu = !showUploadMenu; }}>
-        📷 Add Map
-      </button>
-      
-      {#if showUploadMenu}
-        <div class="upload-menu">
-          <button class="menu-item" onclick={(e) => { e.stopPropagation(); handleCameraUpload(); }}>
-            📷 Take Photo
-          </button>
-          <button class="menu-item" onclick={(e) => { e.stopPropagation(); handleFileUpload(); }}>
-            📁 Choose File
-          </button>
-        </div>
-      {/if}
-    </div>
-    
-    <input 
-      id="file-upload"
-      type="file" 
-      accept="image/*"
+    <button class="upload-btn" onclick={openFilePicker}>
+      📷 Add Map
+    </button>
+
+    <input
+      bind:this={fileInput}
+      type="file"
+      accept="image/*,application/pdf"
       onchange={handleFileSelect}
       style="display: none;"
     />
   </div>
+
+  {#if pdfPicker}
+    <PdfPagePicker
+      doc={pdfPicker.doc}
+      name={pdfPicker.name}
+      pageCount={pdfPicker.pageCount}
+      onconfirm={confirmPdfPage}
+      oncancel={cancelPdfPage}
+    />
+  {/if}
 
   {#if loading}
     <div class="loading">Loading maps...</div>

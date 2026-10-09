@@ -101,6 +101,20 @@ class RecordedCanvasContext {
 
 let canvasContextStub = null;
 
+// jsdom has no `toBlob`. Default to a PNG blob so code that snapshots a canvas
+// works; a test can override the behaviour (e.g. to fail, or to defer) with
+// `stubCanvasToBlob`.
+let canvasToBlobHandler = null;
+
+export function stubCanvasToBlob(handler) {
+  canvasToBlobHandler = handler;
+}
+
+HTMLCanvasElement.prototype.toBlob = function (cb, type, quality) {
+  if (canvasToBlobHandler) return canvasToBlobHandler(cb, this, type, quality);
+  cb(new Blob(['png'], { type: 'image/png' }));
+};
+
 export function installCanvasStub() {
   const originalGetContext = HTMLCanvasElement.prototype.getContext;
 
@@ -225,6 +239,7 @@ let objectUrlCounter = 0;
 const originalCreateObjectURL = URL.createObjectURL;
 
 beforeEach(() => {
+  canvasToBlobHandler = null;
   const resetCanvas = installCanvasStub();
 
   // jsdom has no URL.createObjectURL; provide a stable fake so MapViewer

@@ -25,7 +25,8 @@
     "vitest": "^2.1.9"
   },
   "dependencies": {
-    "maplibre-gl": "^4.0.0"
+    "maplibre-gl": "^4.0.0",
+    "pdfjs-dist": "^4.10.38"
   },
   "overrides": {
     "undici": "6.19.8"

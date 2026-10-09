@@ -26,7 +26,9 @@ const SHELL_ASSETS = [
   '/byom/manifest.json',
 ];
 
-const CACHEABLE_DESTINATIONS = ['script', 'style', 'image', 'font'];
+// PDF.js runs its parser in a worker, which the browser fetches with
+// destination 'worker'; without it here, PDF import would fail offline.
+const CACHEABLE_DESTINATIONS = ['script', 'style', 'image', 'font', 'worker'];
 
 // Install event - cache essential assets
 self.addEventListener('install', (event) => {

@@ -1,0 +1,154 @@
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.5);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 1rem;
+  z-index: 2000;
+}
+
+/* Focusable for Escape handling, but not a control the user aims at. */
+.modal-backdrop:focus {
+  outline: none;
+}
+
+.modal {
+  background: white;
+  border-radius: 12px;
+  padding: 1.5rem;
+  width: 100%;
+  max-width: 320px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+}
+
+.pdf-modal {
+  max-width: 420px;
+}
+
+.modal h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+}
+
+.modal-subtitle {
+  margin: 0 0 1rem;
+  color: #666;
+  font-size: 0.9rem;
+  overflow-wrap: anywhere;
+}
+
+/* Fixed box so the modal does not jump as previews of different aspect ratios
+   are drawn into it. */
+.pdf-preview-frame {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 45vh;
+  min-height: 200px;
+  background: #f2f2f2;
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+/* Single flex item inside the frame: centres the canvas, and stacks the error
+   underneath it rather than letting the two compete for the same row. */
+.pdf-preview-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  max-width: 100%;
+  max-height: 100%;
+  text-align: center;
+}
+
+/* No box of its own: the canvas it holds is the flex item, exactly as before
+   the host was introduced. */
+.pdf-preview-host {
+  display: contents;
+}
+
+.pdf-preview {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+}
+
+.pdf-preview-error {
+  margin: 0;
+  color: #b00020;
+  font-size: 0.9rem;
+}
+
+.pdf-controls {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 1rem;
+}
+
+.pdf-nav {
+  flex: none;
+  width: 2.25rem;
+  height: 2.25rem;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: white;
+  font-size: 1.25rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.pdf-nav:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.pdf-scroll {
+  flex: 1;
+  min-width: 0;
+}
+
+.modal-field {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.95rem;
+}
+
+.pdf-page-field {
+  margin-top: 0.75rem;
+}
+
+.modal-field input {
+  width: 5rem;
+  padding: 0.4rem;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  font-size: 1rem;
+}
+
+.modal-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+.modal-actions .menu-item {
+  width: auto;
+  padding: 0.5rem 1rem;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+  background: white;
+  cursor: pointer;
+}
+
+.modal-actions .menu-item.primary {
+  background: #2196F3;
+  border-color: #2196F3;
+  color: white;
+}
