@@ -1,5 +1,4 @@
 <script>
-  import { untrack } from 'svelte';
   import { getMap, getReferencePoints } from './lib/db.js';
   import { calculateTransform, geoToUV, geoDistanceToUV, imageDivisor, transformIsMirrored } from './lib/transforms.js';
   import { screenToImage, getPointAtScreen, pinchZoomTransform, centerOnImagePoint } from './lib/viewport.js';
@@ -75,15 +74,18 @@
   let animationFrameId = $state(null);
   let needsRender = $state(false);
 
-    $effect(() => {
-    untrack(() => {
+  // Re-runs when `mapId` changes, so a deep-link from one map to another reloads
+  // the viewer instead of keeping the previous map. The read of mapId must sit
+  // in the tracked part of the effect: reads after the `await` are untracked, so
+  // the async body cannot supply the dependency.
+  $effect(() => {
+    const id = mapId;
+    (async () => {
       // setupCanvas reads imageUrl, which loadMapData resolves asynchronously;
       // awaiting here keeps the image source from being set to null.
-      (async () => {
-        await loadMapData();
-        setupCanvas();
-      })();
-    });
+      await loadMapData(id);
+      setupCanvas();
+    })();
     window.addEventListener('resize', handleResize);
 
     return () => {
@@ -99,9 +101,9 @@
 
 
 
-  async function loadMapData() {
+  async function loadMapData(id = mapId) {
     try {
-      map = await getMap(parseInt(mapId));
+      map = await getMap(parseInt(id));
       if (!map) {
         alert('Map not found');
         goBack();
@@ -112,7 +114,7 @@
       imageUrl = URL.createObjectURL(map.imageBlob);
 
       // Load reference points
-      referencePoints = await getReferencePoints(parseInt(mapId));
+      referencePoints = await getReferencePoints(parseInt(id));
       updateGeoTransform();
 
     } catch (error) {
