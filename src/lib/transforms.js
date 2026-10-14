@@ -45,7 +45,6 @@ const FULL_TURN = 360;
 
 // Moving-least-squares (MLS) warp constants. The grid and step are fixed, not
 // tuned, so the fold test stays a sign check rather than a threshold (D8).
-const MLS_ALPHA = 1;
 const MLS_NEWTON_ITERATIONS = 20;
 const MLS_NEWTON_TOLERANCE = 1e-9;
 const FOLD_GRID_SIZE = 48;
@@ -678,10 +677,10 @@ function solve2x2(a, b, c, d, e, f) {
  * Writing the similarity as `q = s·p + t` with `s = a + bi` turns it into a
  * linear least-squares problem in `(a, b, tx, ty)` with a closed-form solution
  * (the 2D Procrustes/Umeyama fit, here in complex form to avoid an SVD of a
- * 2x2 matrix). With `p̄`/`q̄` the centroids and `w_i` optional weights:
+ * 2x2 matrix). With `p̄`/`q̄` the centroids:
  *
- *   num = Σ w_i (p_i − p̄) conj(q_i − q̄)      // complex
- *   den = Σ w_i |p_i − p̄|²                    // real
+ *   num = Σ (p_i − p̄) conj(q_i − q̄)          // complex
+ *   den = Σ |p_i − p̄|²                        // real
  *   s   = num / den
  *   t   = q̄ − s·p̄
  *
@@ -692,10 +691,9 @@ function solve2x2(a, b, c, d, e, f) {
  * @param {Array} points - [{u, v, lon, lat}, ...]
  * @param {number} lon0 - Origin longitude of the metric plane
  * @param {number} lat0 - Origin latitude of the metric plane
- * @param {Array<number>} [weights] - Optional per-point weights.
  * @returns {Object} Transform {m, type: 'similarity', lon0, lat0}
  */
-export function computeLeastSquaresSimilarityTransform(points, lon0, lat0, weights) {
+export function computeLeastSquaresSimilarityTransform(points, lon0, lat0) {
   if (points.length < 2) {
     throw new Error('Need at least 2 reference points');
   }
@@ -712,38 +710,34 @@ export function computeLeastSquaresSimilarityTransform(points, lon0, lat0, weigh
     return { re: x, im: y };
   });
 
-  let sumW = 0;
   let pBarRe = 0;
   let pBarIm = 0;
   let qBarRe = 0;
   let qBarIm = 0;
   for (let i = 0; i < points.length; i++) {
-    const w = weights ? weights[i] : 1;
-    sumW += w;
-    pBarRe += w * p[i].re;
-    pBarIm += w * p[i].im;
-    qBarRe += w * q[i].re;
-    qBarIm += w * q[i].im;
+    pBarRe += p[i].re;
+    pBarIm += p[i].im;
+    qBarRe += q[i].re;
+    qBarIm += q[i].im;
   }
-  pBarRe /= sumW;
-  pBarIm /= sumW;
-  qBarRe /= sumW;
-  qBarIm /= sumW;
+  pBarRe /= points.length;
+  pBarIm /= points.length;
+  qBarRe /= points.length;
+  qBarIm /= points.length;
 
-  // num = Σ w_i (p_i − p̄) conj(q_i − q̄); den = Σ w_i |p_i − p̄|².
+  // num = Σ (p_i − p̄) conj(q_i − q̄); den = Σ |p_i − p̄|².
   let numRe = 0;
   let numIm = 0;
   let den = 0;
   for (let i = 0; i < points.length; i++) {
-    const w = weights ? weights[i] : 1;
     const dpRe = p[i].re - pBarRe;
     const dpIm = p[i].im - pBarIm;
     const dqRe = q[i].re - qBarRe;
     const dqIm = q[i].im - qBarIm;
     // (dpRe + i·dpIm)(dqRe − i·dqIm)
-    numRe += w * (dpRe * dqRe + dpIm * dqIm);
-    numIm += w * (dpIm * dqRe - dpRe * dqIm);
-    den += w * (dpRe * dpRe + dpIm * dpIm);
+    numRe += dpRe * dqRe + dpIm * dqIm;
+    numIm += dpIm * dqRe - dpRe * dqIm;
+    den += dpRe * dpRe + dpIm * dpIm;
   }
 
   if (!(den > 0)) {
@@ -787,7 +781,7 @@ export function computeLeastSquaresSimilarityTransform(points, lon0, lat0, weigh
  * Control points `p_i` (ground, local metres) map to `q_i` (image, canonical
  * frame `x = u`, `y = -v`). For a query ground point `v`:
  *
- *   w_i = alpha / (sigma_i + d_i)²             // sigma_i = accuracy in metres
+ *   w_i = 1 / (sigma_i + d_i)²                 // sigma_i = accuracy in metres
  *   p* = Σ w_i p_i / Σ w_i,  q* = Σ w_i q_i / Σ w_i
  *   M  = (Σ w_i (q_i − q*)(p_i − p*)ᵀ)·(Σ w_i (p_i − p*)(p_i − p*)ᵀ)⁻¹
  *   f(v) = M (v − p*) + q*
@@ -800,12 +794,11 @@ export function computeLeastSquaresSimilarityTransform(points, lon0, lat0, weigh
  *
  * @param {Array} referencePoints - [{u, v, lon, lat, accuracy}, ...]
  * @param {Object} [options]
- * @param {number} [options.alpha] - Weight exponent base (fixed at 1).
  * @param {number} [options.lon0] - Metric plane origin longitude.
  * @param {number} [options.lat0] - Metric plane origin latitude.
  * @returns {Object} { geoToUV, uvToGeo, lon0, lat0, points }
  */
-export function computeMLSWarp(referencePoints, { alpha = MLS_ALPHA, lon0, lat0 } = {}) {
+export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
   if (referencePoints.length < 5) {
     throw new Error('Need at least 5 reference points for an MLS warp');
   }
@@ -832,11 +825,11 @@ export function computeMLSWarp(referencePoints, { alpha = MLS_ALPHA, lon0, lat0 
     referencePoints, origin.lon0, origin.lat0
   );
 
-  /** Weight of control point i at ground query (x, y): alpha / (sigma + d)². */
+  /** Weight of control point i at ground query (x, y): 1 / (sigma + d)². */
   function weightAt(i, x, y) {
     const d = Math.hypot(ground[i].x - x, ground[i].y - y);
     const denom = sigma[i] + d;
-    return alpha / (denom * denom);
+    return 1 / (denom * denom);
   }
 
   /** The affine MLS transform f at ground (x, y): {x, y} in the image frame. */
@@ -930,7 +923,8 @@ export function computeMLSWarp(referencePoints, { alpha = MLS_ALPHA, lon0, lat0 
     const seed = matrixUVToGeo(u, v, extent);
     let local = lonLatToLocalMeters(seed.lon, seed.lat, origin.lon0, origin.lat0);
     let converged = false;
-    const step = 1; // One metre; large next to the MLS's local support.
+    // A small finite-difference step (metres) for the local Jacobian.
+    const step = 1;
 
     for (let iteration = 0; iteration < MLS_NEWTON_ITERATIONS; iteration++) {
       const at = forward(local.east, local.north);
@@ -1067,13 +1061,11 @@ function createMatrixGeoreference(transform) {
  * footprint), and a least-squares similarity fit for MLS maps (D6), so image
  * corners project to a plausible footprint rather than through the local warp.
  * @param {Array} referencePoints
- * @param {number} imageWidth - Unused here; kept so callers pass full context.
- * @param {number} imageHeight - Unused here; kept so callers pass full context.
+ * @param {number} imageWidth - Image width in pixels; the fit is resolution-independent.
+ * @param {number} imageHeight - Image height in pixels; the fit is resolution-independent.
  * @returns {Object|null} Georeference, or null with fewer than two points.
  */
 export function createGeoreference(referencePoints, imageWidth, imageHeight) {
-  void imageWidth;
-  void imageHeight;
   if (!referencePoints || referencePoints.length < 2) {
     return null;
   }
@@ -1084,7 +1076,6 @@ export function createGeoreference(referencePoints, imageWidth, imageHeight) {
 
   const origin = planeOrigin(referencePoints);
   const warp = computeMLSWarp(referencePoints, {
-    alpha: MLS_ALPHA,
     lon0: origin.lon0,
     lat0: origin.lat0,
   });

@@ -1045,16 +1045,14 @@ describe('computeLeastSquaresSimilarityTransform', () => {
     }
   });
 
-  it('supports per-point weights', () => {
+  it('fits a similarity exactly from three or more correspondences', () => {
     const points = [
       mlsPoint(-2000, 0),
       mlsPoint(0, 0),
       mlsPoint(2000, 0),
     ];
-    // Zero weight on the first point should not change the fit's exactness on
-    // the remaining points for a genuinely similar set.
-    const t = computeLeastSquaresSimilarityTransform(points, MLS_LON0, MLS_LAT0, [0, 1, 1]);
-    for (const point of points.slice(1)) {
+    const t = computeLeastSquaresSimilarityTransform(points, MLS_LON0, MLS_LAT0);
+    for (const point of points) {
       const uv = geoToUV(point.lon, point.lat, t);
       expect(uv.u).toBeCloseTo(point.u, 9);
       expect(uv.v).toBeCloseTo(point.v, 9);
