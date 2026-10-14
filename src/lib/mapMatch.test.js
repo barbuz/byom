@@ -17,7 +17,7 @@ import {
   sortSummaries,
   userInMetricBounds,
 } from './mapMatch.js';
-import { calculateTransform, lonLatToLocalMeters } from './transforms.js';
+import { calculateTransform, createGeoreference, lonLatToLocalMeters } from './transforms.js';
 
 // A north-up map: image fraction (u, v) -> ground, with v growing south.
 // On an 800x600 image D = 800, so the image rectangle is [0,1] x [0,0.75].
@@ -315,6 +315,58 @@ describe('mapMatch classification', () => {
     expect(JSON.stringify(summaries[0].inverse)).toBe(before);
     expect(spy).not.toHaveBeenCalled();
     spy.mockRestore();
+  });
+});
+
+describe('mapMatch georeference interface', () => {
+  it('classifies an MLS map through geoToUV and its least-squares extent', () => {
+    // 5+ points take the MLS path; the footprint and containment come from the
+    // georeference's extent transform (D6).
+    const gridPoints = [
+      { u: 0, v: 0, lon: 8.0, lat: 47.0 },
+      { u: 1, v: 0, lon: 8.01, lat: 47.0 },
+      { u: 0, v: 0.75, lon: 8.0, lat: 46.99 },
+      { u: 1, v: 0.75, lon: 8.01, lat: 46.99 },
+      { u: 0.5, v: 0.375, lon: 8.005, lat: 46.995 },
+    ];
+    const summary = buildMapSummaries([makeMap()], pointsByMap([[1, gridPoints]]))[0];
+    expect(summary.transform.type).toBe('mls');
+    expect(summary.inverse).not.toBeNull();
+    expect(summary.boundsMetric).not.toBeNull();
+    expect(summary.boundsGeo).not.toBeNull();
+
+    // The interior centre point is on the map; a far point is not.
+    expect(geoPointInImage(8.005, 46.995, summary.transform, summary.inverse, W, H)).toBe(true);
+    expect(geoPointInImage(8.5, 47.5, summary.transform, summary.inverse, W, H)).toBe(false);
+
+    const { near } = classifyMaps([summary], { latitude: 46.995, longitude: 8.005 });
+    expect(near).toHaveLength(1);
+  });
+
+  it('reports a point outside the footprint via a georeference geoToUV', () => {
+    const points = [
+      { u: 0, v: 0, lon: 8.0, lat: 47.0 },
+      { u: 1, v: 0, lon: 8.01, lat: 47.0 },
+      { u: 0, v: 0.75, lon: 8.0, lat: 46.99 },
+    ];
+    const transform = createGeoreference(points);
+    expect(geoPointInImage(8.5, 47.5, transform, null, W, H)).toBe(false);
+  });
+
+  it('returns false for a bare matrix transform with no cached inverse', () => {
+    const transform = calculateTransform(POINTS);
+    expect(geoPointInImage(8.005, 46.995, transform, null, W, H)).toBe(false);
+  });
+
+  it('accepts a precomputed inverse with a bare matrix transform', () => {
+    const transform = calculateTransform(POINTS);
+    const inverse = precomputeInverse(transform);
+    expect(geoPointInImage(8.005, 46.995, transform, inverse, W, H)).toBe(true);
+    // A georeference wrapper carries its own extent inverse too.
+    const georef = createGeoreference(POINTS);
+    const georefInverse = precomputeInverse(georef);
+    expect(georefInverse).not.toBeNull();
+    expect(geoPointInImage(8.005, 46.995, georef, georefInverse, W, H)).toBe(true);
   });
 });
 

@@ -43,6 +43,14 @@ const PIVOT_EPSILON = 1e-12;
 const HALF_TURN = 180;
 const FULL_TURN = 360;
 
+// Moving-least-squares (MLS) warp constants. The grid and step are fixed, not
+// tuned, so the fold test stays a sign check rather than a threshold (D8).
+const MLS_NEWTON_ITERATIONS = 20;
+const MLS_NEWTON_TOLERANCE = 1e-9;
+const FOLD_GRID_SIZE = 48;
+const FOLD_GRID_PADDING = 0.1;
+const FOLD_STEP = 1e-3;
+
 /**
  * Metres spanned by one degree of longitude at the given latitude.
  * @param {number} lat
@@ -494,14 +502,26 @@ export function computeHomographyTransform(referencePoints) {
 }
 
 /**
- * Transform fractional image coordinates to geographic coordinates. The stored
- * y-down fractions are flipped into the canonical frame before applying `m`.
+ * Whether an object is a Georeference (see `createGeoreference`) rather than a
+ * bare matrix transform. A local warp has no single matrix, so the two shapes
+ * are told apart by the warp methods the georeference exposes.
+ * @param {Object|null} transform
+ * @returns {boolean}
+ */
+function isGeoreference(transform) {
+  return Boolean(transform && typeof transform.geoToUV === 'function');
+}
+
+/**
+ * Transform fractional image coordinates to geographic coordinates for a
+ * matrix model. The stored y-down fractions are flipped into the canonical
+ * frame before applying `m`.
  * @param {number} u - Fractional image x in [0, 1]
  * @param {number} v - Fractional image y in [0, 1] (y-down)
  * @param {Object} transform - Transform object {m, type, lon0, lat0}
  * @returns {Object} {lon, lat}
  */
-export function uvToGeo(u, v, transform) {
+function matrixUVToGeo(u, v, transform) {
   const { x, y } = imageFramePoint(u, v);
   const local = applyMatrix(transform.m, x, y);
   if (!local) {
@@ -511,14 +531,15 @@ export function uvToGeo(u, v, transform) {
 }
 
 /**
- * Transform geographic coordinates to fractional image coordinates. The result
- * is converted from the canonical frame back to the stored y-down fractions.
+ * Transform geographic coordinates to fractional image coordinates for a
+ * matrix model. The result is converted from the canonical frame back to the
+ * stored y-down fractions.
  * @param {number} lon
  * @param {number} lat
  * @param {Object} transform - Transform object {m, type, lon0, lat0}
  * @returns {Object} {u, v}
  */
-export function geoToUV(lon, lat, transform) {
+function matrixGeoToUV(lon, lat, transform) {
   const inverseMatrix = invertMatrix(transform.m);
   if (!inverseMatrix) {
     throw new Error('Transform is singular');
@@ -529,6 +550,38 @@ export function geoToUV(lon, lat, transform) {
     throw new Error('Transform is singular');
   }
   return imageFrameToUV(image.x, image.y);
+}
+
+/**
+ * Transform fractional image coordinates to geographic coordinates. Accepts a
+ * bare matrix transform or a Georeference; the latter routes through its own
+ * `uvToGeo` so a local warp is evaluated by its closure rather than a matrix.
+ * @param {number} u - Fractional image x in [0, 1]
+ * @param {number} v - Fractional image y in [0, 1] (y-down)
+ * @param {Object} transform - Transform {m, type, lon0, lat0} or Georeference
+ * @returns {Object} {lon, lat}
+ */
+export function uvToGeo(u, v, transform) {
+  if (isGeoreference(transform)) {
+    return transform.uvToGeo(u, v);
+  }
+  return matrixUVToGeo(u, v, transform);
+}
+
+/**
+ * Transform geographic coordinates to fractional image coordinates. Accepts a
+ * bare matrix transform or a Georeference; the latter routes through its own
+ * `geoToUV` so a local warp is evaluated by its closure rather than a matrix.
+ * @param {number} lon
+ * @param {number} lat
+ * @param {Object} transform - Transform {m, type, lon0, lat0} or Georeference
+ * @returns {Object} {u, v}
+ */
+export function geoToUV(lon, lat, transform) {
+  if (isGeoreference(transform)) {
+    return transform.geoToUV(lon, lat);
+  }
+  return matrixGeoToUV(lon, lat, transform);
 }
 
 /**
@@ -577,7 +630,9 @@ export function geoDistanceToUV(lon, lat, meters, transform) {
 /**
  * Fit the appropriate model for the number of reference points available:
  * two -> similarity, three -> affine, four -> homography. Extra points are
- * not used yet; a least-squares fit is future work.
+ * ignored by the matrix models; callers that want a local warp for 5+ points
+ * use `createGeoreference`, which escalates to affine MLS. Kept exported and
+ * matrix-only for the landing page and tests.
  * @param {Array} referencePoints
  * @returns {Object|null} Transform object, or null if fewer than two points.
  */
@@ -592,4 +647,453 @@ export function calculateTransform(referencePoints) {
     return computeAffineTransform(referencePoints);
   }
   return computeHomographyTransform(referencePoints);
+}
+
+/**
+ * Solve a 2x2 linear system `[[a, b], [c, d]] x = [e, f]` by Cramer's rule.
+ * @param {number} a
+ * @param {number} b
+ * @param {number} c
+ * @param {number} d
+ * @param {number} e
+ * @param {number} f
+ * @returns {Object|null} {x, y}, or null when the matrix is singular.
+ */
+function solve2x2(a, b, c, d, e, f) {
+  const determinant = a * d - b * c;
+  // A NaN determinant also fails this test, so no separate isFinite guard.
+  if (!(Math.abs(determinant) >= PIVOT_EPSILON)) {
+    return null;
+  }
+  return {
+    x: (e * d - b * f) / determinant,
+    y: (a * f - e * c) / determinant,
+  };
+}
+
+/**
+ * Complex-number representation of a 2D similarity, fitted by least squares.
+ *
+ * Writing the similarity as `q = s·p + t` with `s = a + bi` turns it into a
+ * linear least-squares problem in `(a, b, tx, ty)` with a closed-form solution
+ * (the 2D Procrustes/Umeyama fit, here in complex form to avoid an SVD of a
+ * 2x2 matrix). With `p̄`/`q̄` the centroids:
+ *
+ *   num = Σ (p_i − p̄) conj(q_i − q̄)          // complex
+ *   den = Σ |p_i − p̄|²                        // real
+ *   s   = num / den
+ *   t   = q̄ − s·p̄
+ *
+ * It is used as the MLS map's `extentTransform` (D6): projecting the image
+ * corners through a global similarity gives a plausible footprint where the
+ * local warp would extrapolate badly. At least two points are required, which
+ * is always true on the MLS path (5+).
+ * @param {Array} points - [{u, v, lon, lat}, ...]
+ * @param {number} lon0 - Origin longitude of the metric plane
+ * @param {number} lat0 - Origin latitude of the metric plane
+ * @returns {Object} Transform {m, type: 'similarity', lon0, lat0}
+ */
+export function computeLeastSquaresSimilarityTransform(points, lon0, lat0) {
+  if (points.length < 2) {
+    throw new Error('Need at least 2 reference points');
+  }
+  assertFinitePoints(points);
+
+  // Ground points (metric plane) and canonical image points (x = u, y = -v),
+  // represented as complex numbers p = east + i·north and q = x + i·y.
+  const p = points.map((point) => {
+    const { east, north } = lonLatToLocalMeters(point.lon, point.lat, lon0, lat0);
+    return { re: east, im: north };
+  });
+  const q = points.map(({ u, v }) => {
+    const { x, y } = imageFramePoint(u, v);
+    return { re: x, im: y };
+  });
+
+  let pBarRe = 0;
+  let pBarIm = 0;
+  let qBarRe = 0;
+  let qBarIm = 0;
+  for (let i = 0; i < points.length; i++) {
+    pBarRe += p[i].re;
+    pBarIm += p[i].im;
+    qBarRe += q[i].re;
+    qBarIm += q[i].im;
+  }
+  pBarRe /= points.length;
+  pBarIm /= points.length;
+  qBarRe /= points.length;
+  qBarIm /= points.length;
+
+  // num = Σ (p_i − p̄) conj(q_i − q̄); den = Σ |p_i − p̄|².
+  let numRe = 0;
+  let numIm = 0;
+  let den = 0;
+  for (let i = 0; i < points.length; i++) {
+    const dpRe = p[i].re - pBarRe;
+    const dpIm = p[i].im - pBarIm;
+    const dqRe = q[i].re - qBarRe;
+    const dqIm = q[i].im - qBarIm;
+    // (dpRe + i·dpIm)(dqRe − i·dqIm)
+    numRe += dpRe * dqRe + dpIm * dqIm;
+    numIm += dpIm * dqRe - dpRe * dqIm;
+    den += dpRe * dpRe + dpIm * dpIm;
+  }
+
+  if (!(den > 0)) {
+    throw new Error('Reference points must be distinct');
+  }
+
+  // s = num / den = a + bi.
+  const a = numRe / den;
+  const b = numIm / den;
+  // t = q̄ − s·p̄.
+  const tx = qBarRe - (a * pBarRe - b * pBarIm);
+  const ty = qBarIm - (b * pBarRe + a * pBarIm);
+
+  // q = s·p + t maps (east, north) -> (x, y). Invert: p = s⁻¹(q − t), with
+  // s⁻¹ = conj(s)/|s|², giving the canonical-frame -> metric matrix
+  //   east  = (a·qx + b·qy)/S
+  //   north = (−b·qx + a·qy)/S,   qx = x − tx, qy = y − ty, S = a² + b².
+  const scaleSquared = a * a + b * b;
+  if (!(scaleSquared > 0)) {
+    throw new Error('Reference points must be distinct');
+  }
+  const eastFromX = a / scaleSquared;
+  const eastFromY = b / scaleSquared;
+  const northFromX = -b / scaleSquared;
+  const northFromY = a / scaleSquared;
+  return {
+    m: [
+      eastFromX, eastFromY, -(eastFromX * tx + eastFromY * ty),
+      northFromX, northFromY, -(northFromX * tx + northFromY * ty),
+      0, 0, 1,
+    ],
+    type: 'similarity',
+    lon0,
+    lat0,
+  };
+}
+
+/**
+ * Affine moving-least-squares warp (Schaefer, McPhail & Warren, 2006).
+ *
+ * Control points `p_i` (ground, local metres) map to `q_i` (image, canonical
+ * frame `x = u`, `y = -v`). For a query ground point `v`:
+ *
+ *   w_i = 1 / (sigma_i + d_i)²                 // sigma_i = accuracy in metres
+ *   p* = Σ w_i p_i / Σ w_i,  q* = Σ w_i q_i / Σ w_i
+ *   M  = (Σ w_i (q_i − q*)(p_i − p*)ᵀ)·(Σ w_i (p_i − p*)(p_i − p*)ᵀ)⁻¹
+ *   f(v) = M (v − p*) + q*
+ *
+ * The warp is smooth, locally supported and interpolating, so a metro or ski
+ * map's piecewise/non-projective warp is represented without a global model
+ * (D1–D5). The second factor is a 2x2 inverse, singular exactly when the local
+ * control points are collinear; `sigma_i = 0` (null accuracy) reproduces plain
+ * 1/d² interpolating MLS and makes the warp exact at the control points.
+ *
+ * @param {Array} referencePoints - [{u, v, lon, lat, accuracy}, ...]
+ * @param {Object} [options]
+ * @param {number} [options.lon0] - Metric plane origin longitude.
+ * @param {number} [options.lat0] - Metric plane origin latitude.
+ * @returns {Object} { geoToUV, uvToGeo, lon0, lat0, points }
+ */
+export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
+  if (referencePoints.length < 5) {
+    throw new Error('Need at least 5 reference points for an MLS warp');
+  }
+  assertFinitePoints(referencePoints);
+
+  const origin = lon0 === undefined || lat0 === undefined
+    ? planeOrigin(referencePoints)
+    : { lon0, lat0 };
+
+  // Control points in the metric plane (p) and the canonical image frame (q).
+  const ground = referencePoints.map((point) => {
+    const { east, north } = lonLatToLocalMeters(point.lon, point.lat, origin.lon0, origin.lat0);
+    return { x: east, y: north };
+  });
+  const image = referencePoints.map(({ u, v }) => imageFramePoint(u, v));
+  const sigma = referencePoints.map((point) =>
+    Number.isFinite(point.accuracy) ? Math.abs(point.accuracy) : 0
+  );
+
+  // The global similarity (D6): its inverse seeds the iterative `uvToGeo`, and
+  // its forward map is the fallback where a local fit is singular. It is stable
+  // everywhere the local warp is not.
+  const extent = computeLeastSquaresSimilarityTransform(
+    referencePoints, origin.lon0, origin.lat0
+  );
+
+  /** Weight of control point i at ground query (x, y): 1 / (sigma + d)². */
+  function weightAt(i, x, y) {
+    const d = Math.hypot(ground[i].x - x, ground[i].y - y);
+    const denom = sigma[i] + d;
+    return 1 / (denom * denom);
+  }
+
+  /** The affine MLS transform f at ground (x, y): {x, y} in the image frame. */
+  function forward(x, y) {
+    // An exact hit on a hand-placed control point (sigma = 0) interpolates
+    // directly; the weighted fit is singular there because every weight but
+    // this one is finite. A point with sigma > 0 has a finite weight at d = 0,
+    // so it is deliberately softened rather than pinned (D4).
+    for (let i = 0; i < ground.length; i++) {
+      if (sigma[i] === 0 && ground[i].x === x && ground[i].y === y) {
+        return { x: image[i].x, y: image[i].y };
+      }
+    }
+
+    let sumW = 0;
+    let pStarX = 0;
+    let pStarY = 0;
+    let qStarX = 0;
+    let qStarY = 0;
+    const w = new Array(ground.length);
+    for (let i = 0; i < ground.length; i++) {
+      const wi = weightAt(i, x, y);
+      w[i] = wi;
+      sumW += wi;
+      pStarX += wi * ground[i].x;
+      pStarY += wi * ground[i].y;
+      qStarX += wi * image[i].x;
+      qStarY += wi * image[i].y;
+    }
+    pStarX /= sumW;
+    pStarY /= sumW;
+    qStarX /= sumW;
+    qStarY /= sumW;
+
+    // Accumulate A = Σ w (q−q*)(p−p*)ᵀ (2x2) and B = Σ w (p−p*)(p−p*)ᵀ (2x2).
+    let a00 = 0, a01 = 0, a10 = 0, a11 = 0;
+    let b00 = 0, b01 = 0, b10 = 0, b11 = 0;
+    for (let i = 0; i < ground.length; i++) {
+      const dpX = ground[i].x - pStarX;
+      const dpY = ground[i].y - pStarY;
+      const dqX = image[i].x - qStarX;
+      const dqY = image[i].y - qStarY;
+      a00 += w[i] * dqX * dpX;
+      a01 += w[i] * dqX * dpY;
+      a10 += w[i] * dqY * dpX;
+      a11 += w[i] * dqY * dpY;
+      b00 += w[i] * dpX * dpX;
+      b01 += w[i] * dpX * dpY;
+      b10 += w[i] * dpY * dpX;
+      b11 += w[i] * dpY * dpY;
+    }
+
+    // M = A · B⁻¹. Solving M·B = A by Cramer's rule per column avoids forming
+    // B⁻¹ explicitly; B is singular when the local control points are collinear.
+    const bx = solve2x2(b00, b01, b10, b11, a00, a10);
+    const by = solve2x2(b00, b01, b10, b11, a01, a11);
+    if (!bx || !by) {
+      return null;
+    }
+    const dx = x - pStarX;
+    const dy = y - pStarY;
+    return {
+      x: bx.x * dx + bx.y * dy + qStarX,
+      y: by.x * dx + by.y * dy + qStarY,
+    };
+  }
+
+  /**
+   * Direct evaluation ground -> image, then back to stored y-down fractions.
+   * Where the local fit is singular (collinear control points) it falls back to
+   * the global similarity (D6), matching `uvToGeo`, so a singular configuration
+   * is handled without throwing (Phase 2 exit).
+   */
+  function warpGeoToUV(lon, lat) {
+    const local = lonLatToLocalMeters(lon, lat, origin.lon0, origin.lat0);
+    const mapped = forward(local.east, local.north);
+    if (mapped) {
+      return imageFrameToUV(mapped.x, mapped.y);
+    }
+    return matrixGeoToUV(lon, lat, extent);
+  }
+
+  /**
+   * Inverse image -> ground by Newton iteration: v ← v + M(v)⁻¹ (target − f(v)).
+   * `M(v)` is the affine Jacobian at v, obtained from `forward` by finite
+   * differences. Falls back to the global fit's inverse on non-convergence, so
+   * a query outside the warp's support still returns a sane position.
+   */
+  function warpUVToGeo(u, v) {
+    const target = imageFramePoint(u, v);
+    const seed = matrixUVToGeo(u, v, extent);
+    let local = lonLatToLocalMeters(seed.lon, seed.lat, origin.lon0, origin.lat0);
+    let converged = false;
+    // A small finite-difference step (metres) for the local Jacobian.
+    const step = 1;
+
+    for (let iteration = 0; iteration < MLS_NEWTON_ITERATIONS; iteration++) {
+      const at = forward(local.east, local.north);
+      const atX = forward(local.east + step, local.north);
+      const atY = forward(local.east, local.north + step);
+      // A singular local configuration (collinear control points) makes the
+      // Jacobian undefined; fall back rather than diverge.
+      if (!at || !atX || !atY) break;
+      const residualX = target.x - at.x;
+      const residualY = target.y - at.y;
+      if (Math.hypot(residualX, residualY) < MLS_NEWTON_TOLERANCE) {
+        converged = true;
+        break;
+      }
+      const j00 = (atX.x - at.x) / step;
+      const j10 = (atX.y - at.y) / step;
+      const j01 = (atY.x - at.x) / step;
+      const j11 = (atY.y - at.y) / step;
+      const delta = solve2x2(j00, j01, j10, j11, residualX, residualY);
+      if (!delta) break;
+      local = { east: local.east + delta.x, north: local.north + delta.y };
+    }
+    return converged
+      ? localMetersToLonLat(local.east, local.north, origin.lon0, origin.lat0)
+      : seed;
+  }
+
+  return {
+    geoToUV: warpGeoToUV,
+    uvToGeo: warpUVToGeo,
+    lon0: origin.lon0,
+    lat0: origin.lat0,
+    points: referencePoints,
+  };
+}
+
+/**
+ * Fold state of a warp over a fixed grid: the finite-difference Jacobian
+ * determinant of the ground -> image map. A correctly georeferenced map has a
+ * positive determinant everywhere; a misplaced control point folds the warp so
+ * some sample has `det <= 0`. This is a sign test (D8), generalising the
+ * single-matrix `transformIsMirrored` check to a local warp.
+ *
+ * 3 warp evaluations per sample over a 48x48 grid is O(N) each and computed
+ * once per fit, cached on the georeference, never on the per-frame path.
+ * @param {(lon: number, lat: number) => {u: number, v: number}} geoToUV
+ * @param {Array} points - Control points [{lon, lat}, ...]
+ * @param {number} lon0
+ * @param {number} lat0
+ * @param {number} [grid]
+ * @returns {{folded: boolean, minDet: number}}
+ */
+export function computeFoldState(geoToUV, points, lon0, lat0, grid = FOLD_GRID_SIZE) {
+  // Ground AABB of the control points, padded ~10%.
+  const locals = points.map((point) =>
+    lonLatToLocalMeters(point.lon, point.lat, lon0, lat0)
+  );
+  const minEast = Math.min(...locals.map((p) => p.east));
+  const maxEast = Math.max(...locals.map((p) => p.east));
+  const minNorth = Math.min(...locals.map((p) => p.north));
+  const maxNorth = Math.max(...locals.map((p) => p.north));
+  const padEast = (maxEast - minEast) * FOLD_GRID_PADDING || 1;
+  const padNorth = (maxNorth - minNorth) * FOLD_GRID_PADDING || 1;
+  const e0 = minEast - padEast;
+  const e1 = maxEast + padEast;
+  const n0 = minNorth - padNorth;
+  const n1 = maxNorth + padNorth;
+  const h = Math.max(e1 - e0, n1 - n0) * FOLD_STEP || FOLD_STEP;
+
+  /** Evaluate the warp at a ground point given in the metric plane. */
+  const warpAt = (east, north) => {
+    const { lon, lat } = localMetersToLonLat(east, north, lon0, lat0);
+    return geoToUV(lon, lat);
+  };
+
+  let minDet = Infinity;
+  let folded = false;
+  for (let iy = 0; iy < grid; iy++) {
+    const north = n0 + ((n1 - n0) * iy) / (grid - 1);
+    for (let ix = 0; ix < grid; ix++) {
+      const east = e0 + ((e1 - e0) * ix) / (grid - 1);
+      const base = warpAt(east, north);
+      const eastPlus = warpAt(east + h, north);
+      const northPlus = warpAt(east, north + h);
+      // The warp is stored y-down; the canonical frame negates y, which flips
+      // the determinant's sign. Work in the canonical frame so a correct map is
+      // positive, matching transformIsMirrored.
+      const j00 = (eastPlus.u - base.u) / h;
+      const j10 = -((eastPlus.v - base.v) / h);
+      const j01 = (northPlus.u - base.u) / h;
+      const j11 = -((northPlus.v - base.v) / h);
+      const det = j00 * j11 - j01 * j10;
+      // A NaN sample fails `det > 0`, so it is conservatively treated as folded.
+      if (det < minDet) {
+        minDet = det;
+      }
+      if (!(det > 0)) {
+        folded = true;
+      }
+    }
+  }
+  return { folded, minDet };
+}
+
+/**
+ * Wrap a matrix transform as a Georeference: the warp methods delegate to the
+ * matrix implementation and `extentTransform` is the model itself (D6). Kept
+ * internal to `createGeoreference`, which is the public entry point.
+ * @param {Object} transform - {m, type, lon0, lat0}
+ * @returns {Object} Georeference
+ */
+function createMatrixGeoreference(transform) {
+  return {
+    type: transform.type,
+    lon0: transform.lon0,
+    lat0: transform.lat0,
+    geoToUV: (lon, lat) => matrixGeoToUV(lon, lat, transform),
+    uvToGeo: (u, v) => matrixUVToGeo(u, v, transform),
+    extentTransform: transform,
+    // A matrix warp has a constant determinant, so the fold test degenerates
+    // to the existing mirrored check.
+    isFolded: () => transformIsMirrored(transform),
+  };
+}
+
+/**
+ * Build the Georeference for a set of reference points: the single interface
+ * every consumer holds, so a local warp (no single matrix) and the matrix
+ * models share one shape. The model ladder is deterministic (D1):
+ *
+ *   2 -> similarity, 3 -> affine, 4 -> homography, 5+ -> affine MLS
+ *
+ * `extentTransform` is the model itself for 2–4 points (preserving today's
+ * footprint), and a least-squares similarity fit for MLS maps (D6), so image
+ * corners project to a plausible footprint rather than through the local warp.
+ * The fit is resolution-independent: reference points are stored as fractions
+ * of `imageDivisor(W, H)`, so pixel dimensions are only needed by the callers
+ * that convert to and from pixels (`mapMatch.js`, `MapViewer.svelte`).
+ * @param {Array} referencePoints
+ * @returns {Object|null} Georeference, or null with fewer than two points.
+ */
+export function createGeoreference(referencePoints) {
+  if (!referencePoints || referencePoints.length < 2) {
+    return null;
+  }
+
+  if (referencePoints.length < 5) {
+    return createMatrixGeoreference(calculateTransform(referencePoints));
+  }
+
+  const origin = planeOrigin(referencePoints);
+  const warp = computeMLSWarp(referencePoints, {
+    lon0: origin.lon0,
+    lat0: origin.lat0,
+  });
+  const extentTransform = computeLeastSquaresSimilarityTransform(
+    referencePoints, origin.lon0, origin.lat0
+  );
+  const foldState = computeFoldState(
+    warp.geoToUV, referencePoints, origin.lon0, origin.lat0
+  );
+
+  return {
+    type: 'mls',
+    lon0: origin.lon0,
+    lat0: origin.lat0,
+    geoToUV: warp.geoToUV,
+    uvToGeo: warp.uvToGeo,
+    extentTransform,
+    isFolded: () => foldState.folded,
+  };
 }
