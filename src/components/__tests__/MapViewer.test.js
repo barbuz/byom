@@ -695,6 +695,53 @@ describe("MapViewer mirrored map warning", () => {
   });
 });
 
+describe("MapViewer moving-least-squares warp", () => {
+  // Five points take the MLS path (D1). A uniform ground grid mapped to a
+  // north-up image; swapping two ground positions folds the local warp.
+  const MLS_POINTS = [
+    { id: 1, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -74.0, lat: 40.0, accuracy: null },
+    { id: 2, mapId: 1, u: 700 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -73.0, lat: 40.0, accuracy: null },
+    { id: 3, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 500 / IMAGE_DIVISOR, lon: -74.0, lat: 39.0, accuracy: null },
+    { id: 4, mapId: 1, u: 700 / IMAGE_DIVISOR, v: 500 / IMAGE_DIVISOR, lon: -73.0, lat: 39.0, accuracy: null },
+    { id: 5, mapId: 1, u: 400 / IMAGE_DIVISOR, v: 300 / IMAGE_DIVISOR, lon: -73.5, lat: 39.5, accuracy: null },
+  ];
+  const FOLDED = MLS_POINTS.map((point) =>
+    point.id === 3 ? { ...point, lon: -74.0, lat: 40.5 } : point);
+
+  it("labels the model as a moving-least-squares warp for 5+ points", async () => {
+    getReferencePoints.mockResolvedValue(MLS_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(screen.getByText(/Points \(5\)/));
+    await flushPromises();
+
+    await screen.findByText(/Moving-least-squares warp \(5 points\)/);
+    assert.equal(screen.queryByText(/Homography transform/), null);
+  });
+
+  it("warns that a reference point is likely misplaced when the warp folds", async () => {
+    getReferencePoints.mockResolvedValue(FOLDED);
+    await mountViewer();
+    await sleep(30);
+
+    await screen.findByText(/Folded map: a reference point is likely misplaced/);
+    assert.equal(screen.queryByText(/Georeference unavailable/), null);
+  });
+
+  it("does not warn for a correctly mapped MLS warp", async () => {
+    getReferencePoints.mockResolvedValue(MLS_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(screen.getByText(/Points \(5\)/));
+    await flushPromises();
+
+    assert.equal(screen.queryByText(/Folded map/), null);
+    assert.equal(screen.queryByText(/Mirrored map/), null);
+  });
+});
+
 describe("MapViewer point editing", () => {
   // The component sizes the canvas to the viewport and fits the 800x600
   // image into it, so the first reference point is not at its raw pixel

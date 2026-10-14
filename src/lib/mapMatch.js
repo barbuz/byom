@@ -19,7 +19,7 @@
  */
 
 import {
-  calculateTransform,
+  createGeoreference,
   imageDivisor,
   invertMatrix,
   lonLatToLocalMeters,
@@ -63,19 +63,35 @@ function imageCornerFractions(W, H) {
 }
 
 /**
+ * The transform whose image corners bound a map's footprint. For a matrix
+ * model this is the model itself; for an MLS map it is the least-squares
+ * similarity fit (D6), because the local warp extrapolates badly beyond its
+ * control points. Falls back to the transform itself when no extent is set.
+ * @param {Object} transform - Transform {m,...} or Georeference
+ * @returns {Object}
+ */
+function extentTransformOf(transform) {
+  return transform.extentTransform ?? transform;
+}
+
+/**
  * Axis-aligned bounds of a map's footprint in its local metric plane. The
  * projected image is convex (a similarity/affine parallelogram or a projective
  * quadrilateral), so the four projected corners bound the whole footprint.
- * @param {Object|null} transform - Transform object {m, type, lon0, lat0}
+ * Corners are projected through the extent transform (D6), not the local warp.
+ * @param {Object|null} transform - Transform {m,...} or Georeference
  * @param {number} W
  * @param {number} H
  * @returns {{minEast: number, maxEast: number, minNorth: number, maxNorth: number}|null}
  */
 export function imageCornersToMetricBounds(transform, W, H) {
-  if (!transform || !transform.m || !(W > 0) || !(H > 0)) return null;
+  if (!transform || !(W > 0) || !(H > 0)) return null;
+
+  const extent = extentTransformOf(transform);
+  if (!extent.m) return null;
 
   const corners = imageCornerFractions(W, H).map(({ u, v }) =>
-    applyMatrix(transform.m, u, -v)
+    applyMatrix(extent.m, u, -v)
   );
   if (corners.some((corner) => !corner)) return null;
 
@@ -91,19 +107,23 @@ export function imageCornersToMetricBounds(transform, W, H) {
 
 /**
  * The four projected image corners as lon/lat, for display and as a coarse
- * fallback. The min/max below assumes the map does not straddle the
- * antimeridian; callers that only need containment should use the metric bounds
- * and `geoPointInImage` instead, which are wrap-safe.
+ * fallback. Corners are projected through the extent transform (D6). The
+ * min/max below assumes the map does not straddle the antimeridian; callers
+ * that only need containment should use the metric bounds and
+ * `geoPointInImage` instead, which are wrap-safe.
  * @param {Object|null} transform
  * @param {number} W
  * @param {number} H
  * @returns {{minLon: number, maxLon: number, minLat: number, maxLat: number}|null}
  */
 export function imageCornersToGeoBounds(transform, W, H) {
-  if (!transform || !transform.m || !(W > 0) || !(H > 0)) return null;
+  if (!transform || !(W > 0) || !(H > 0)) return null;
+
+  const extent = extentTransformOf(transform);
+  if (!extent.m) return null;
 
   const corners = imageCornerFractions(W, H).map(({ u, v }) =>
-    uvToGeo(u, v, transform)
+    uvToGeo(u, v, extent)
   );
   const lons = corners.map((corner) => corner.lon);
   const lats = corners.map((corner) => corner.lat);
@@ -116,13 +136,16 @@ export function imageCornersToGeoBounds(transform, W, H) {
 }
 
 /**
- * Invert a fitted transform once so the per-fix path never inverts again.
+ * Invert a fitted transform's extent matrix once so the per-fix path never
+ * inverts again. For an MLS map this inverts the extent similarity, which is
+ * the same global fit the exact test seeds from.
  * @param {Object|null} transform
  * @returns {Array<number>|null}
  */
 export function precomputeInverse(transform) {
-  if (!transform || !transform.m) return null;
-  return invertMatrix(transform.m);
+  const extent = transform ? extentTransformOf(transform) : null;
+  if (!extent || !extent.m) return null;
+  return invertMatrix(extent.m);
 }
 
 /**
@@ -144,26 +167,35 @@ export function userInMetricBounds(lon, lat, lon0, lat0, boundsMetric) {
 }
 
 /**
- * Exact containment test: map the user through the precomputed inverse and
- * check the image fraction lies in `[0, W/D] x [0, H/D]`. No inversion here.
+ * Exact containment test: map the user onto the image and check the fraction
+ * lies in `[0, W/D] x [0, H/D]`. A Georeference is evaluated directly by its
+ * `geoToUV` (which handles a local MLS warp); a bare matrix transform uses the
+ * precomputed inverse, so no inversion happens on the per-fix path.
  * @param {number} lon
  * @param {number} lat
- * @param {Object} transform
+ * @param {Object} transform - Transform {m,...} or Georeference
  * @param {Array<number>|null} inverse
  * @param {number} W
  * @param {number} H
  * @returns {boolean}
  */
 export function geoPointInImage(lon, lat, transform, inverse, W, H) {
-  if (!transform || !inverse || !(W > 0) || !(H > 0)) return false;
+  if (!transform || !(W > 0) || !(H > 0)) return false;
 
-  const { east, north } = lonLatToLocalMeters(lon, lat, transform.lon0, transform.lat0);
-  const image = applyMatrix(inverse, east, north);
-  if (!image) return false;
+  let u;
+  let v;
+  if (typeof transform.geoToUV === 'function') {
+    ({ u, v } = transform.geoToUV(lon, lat));
+  } else {
+    if (!inverse) return false;
+    const { east, north } = lonLatToLocalMeters(lon, lat, transform.lon0, transform.lat0);
+    const image = applyMatrix(inverse, east, north);
+    if (!image) return false;
+    u = image.x;
+    v = -image.y;
+  }
 
   const D = imageDivisor(W, H);
-  const u = image.x;
-  const v = -image.y;
   return u >= 0 && u <= W / D && v >= 0 && v <= H / D;
 }
 
@@ -271,7 +303,7 @@ export function buildMapSummaries(maps, pointsByMap) {
     let transform = null;
     if (pointCount >= 2) {
       try {
-        transform = calculateTransform(points);
+        transform = createGeoreference(points, W, H);
       } catch {
         transform = null;
       }
