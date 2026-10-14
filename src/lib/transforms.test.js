@@ -1224,8 +1224,8 @@ describe('computeFoldState', () => {
 
 describe('createGeoreference', () => {
   it('returns null with fewer than two points', () => {
-    expect(createGeoreference([], 1000, 1000)).toBeNull();
-    expect(createGeoreference(null, 1000, 1000)).toBeNull();
+    expect(createGeoreference([])).toBeNull();
+    expect(createGeoreference(null)).toBeNull();
   });
 
   it('follows the model ladder: 2 similarity, 3 affine, 4 homography, 5+ mls', () => {
@@ -1236,15 +1236,15 @@ describe('createGeoreference', () => {
       mlsPoint(2000, 2000),
       mlsPoint(0, 0),
     ];
-    expect(createGeoreference(corners.slice(0, 2), 1000, 1000).type).toBe('similarity');
-    expect(createGeoreference(corners.slice(0, 3), 1000, 1000).type).toBe('affine');
-    expect(createGeoreference(corners.slice(0, 4), 1000, 1000).type).toBe('homography');
-    expect(createGeoreference(corners.slice(0, 5), 1000, 1000).type).toBe('mls');
+    expect(createGeoreference(corners.slice(0, 2)).type).toBe('similarity');
+    expect(createGeoreference(corners.slice(0, 3)).type).toBe('affine');
+    expect(createGeoreference(corners.slice(0, 4)).type).toBe('homography');
+    expect(createGeoreference(corners.slice(0, 5)).type).toBe('mls');
   });
 
   it('wraps a matrix model with a matrix extent and the mirrored fold check', () => {
     const points = [mlsPoint(-2000, -2000), mlsPoint(2000, -2000), mlsPoint(-2000, 2000)];
-    const georef = createGeoreference(points, 1000, 1000);
+    const georef = createGeoreference(points);
     expect(georef.extentTransform.m).toHaveLength(9);
     expect(georef.extentTransform.type).toBe('affine');
     expect(georef.isFolded()).toBe(false);
@@ -1260,7 +1260,7 @@ describe('createGeoreference', () => {
 
   it('uses a least-squares similarity extent for an MLS map (D6)', () => {
     const points = mlsGrid();
-    const georef = createGeoreference(points, 1000, 1000);
+    const georef = createGeoreference(points);
     expect(georef.type).toBe('mls');
     expect(georef.extentTransform.type).toBe('similarity');
     expect(georef.isFolded()).toBe(false);
@@ -1273,13 +1273,13 @@ describe('createGeoreference', () => {
     const points = mlsGrid();
     [points[0].lon, points[6].lon] = [points[6].lon, points[0].lon];
     [points[0].lat, points[6].lat] = [points[6].lat, points[0].lat];
-    const georef = createGeoreference(points, 1000, 1000);
+    const georef = createGeoreference(points);
     expect(georef.isFolded()).toBe(true);
   });
 
   it('routes the module-level uvToGeo/geoToUV through a georeference', () => {
     const points = mlsGrid();
-    const georef = createGeoreference(points, 1000, 1000);
+    const georef = createGeoreference(points);
     const uv = geoToUV(points[3].lon, points[3].lat, georef);
     expect(uv.u).toBeCloseTo(points[3].u, 9);
     const geo = uvToGeo(points[3].u, points[3].v, georef);
@@ -1292,7 +1292,7 @@ describe('createGeoreference', () => {
       { u: 0, v: 0, lon: MLS_LON0, lat: MLS_LAT0 },
       { u: 1, v: 1, lon: MLS_LON0, lat: MLS_LAT0 },
     ];
-    expect(() => createGeoreference(coincident, 1000, 1000))
+    expect(() => createGeoreference(coincident))
       .toThrow('Reference points must be distinct');
   });
 });

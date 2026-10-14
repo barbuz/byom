@@ -313,7 +313,7 @@
 
   function updateGeoTransform() {
     try {
-      geoTransform = createGeoreference(referencePoints, imageWidth, imageHeight);
+      geoTransform = createGeoreference(referencePoints);
       geoTransformError = null;
     } catch (error) {
       // A degenerate point set (e.g. two points sharing GPS coordinates but
@@ -570,7 +570,7 @@
    */
   function transformErrorFor(points) {
     try {
-      createGeoreference(points, imageWidth, imageHeight);
+      createGeoreference(points);
       return null;
     } catch (error) {
       return error.message;

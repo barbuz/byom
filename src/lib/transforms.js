@@ -1060,12 +1060,13 @@ function createMatrixGeoreference(transform) {
  * `extentTransform` is the model itself for 2–4 points (preserving today's
  * footprint), and a least-squares similarity fit for MLS maps (D6), so image
  * corners project to a plausible footprint rather than through the local warp.
+ * The fit is resolution-independent: reference points are stored as fractions
+ * of `imageDivisor(W, H)`, so pixel dimensions are only needed by the callers
+ * that convert to and from pixels (`mapMatch.js`, `MapViewer.svelte`).
  * @param {Array} referencePoints
- * @param {number} imageWidth - Image width in pixels; the fit is resolution-independent.
- * @param {number} imageHeight - Image height in pixels; the fit is resolution-independent.
  * @returns {Object|null} Georeference, or null with fewer than two points.
  */
-export function createGeoreference(referencePoints, imageWidth, imageHeight) {
+export function createGeoreference(referencePoints) {
   if (!referencePoints || referencePoints.length < 2) {
     return null;
   }

@@ -349,7 +349,7 @@ describe('mapMatch georeference interface', () => {
       { u: 1, v: 0, lon: 8.01, lat: 47.0 },
       { u: 0, v: 0.75, lon: 8.0, lat: 46.99 },
     ];
-    const transform = createGeoreference(points, W, H);
+    const transform = createGeoreference(points);
     expect(geoPointInImage(8.5, 47.5, transform, null, W, H)).toBe(false);
   });
 
@@ -363,7 +363,7 @@ describe('mapMatch georeference interface', () => {
     const inverse = precomputeInverse(transform);
     expect(geoPointInImage(8.005, 46.995, transform, inverse, W, H)).toBe(true);
     // A georeference wrapper carries its own extent inverse too.
-    const georef = createGeoreference(POINTS, W, H);
+    const georef = createGeoreference(POINTS);
     const georefInverse = precomputeInverse(georef);
     expect(georefInverse).not.toBeNull();
     expect(geoPointInImage(8.005, 46.995, georef, georefInverse, W, H)).toBe(true);

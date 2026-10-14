@@ -303,7 +303,7 @@ export function buildMapSummaries(maps, pointsByMap) {
     let transform = null;
     if (pointCount >= 2) {
       try {
-        transform = createGeoreference(points, W, H);
+        transform = createGeoreference(points);
       } catch {
         transform = null;
       }
