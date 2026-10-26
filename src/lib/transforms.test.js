@@ -1138,7 +1138,7 @@ describe('computeMLSWarp', () => {
   it('falls back to the global similarity for a singular (collinear) local fit', () => {
     // Control points along one diagonal make every local fit singular away from
     // the exact control-point hits; the warp then falls back to the extent
-    // similarity rather than throwing (Phase 2 exit).
+    // similarity rather than throwing.
     const collinear = [];
     for (let i = -2; i <= 2; i++) collinear.push(mlsPoint(i * 1000, i * 1000));
     const warp = computeMLSWarp(collinear, { lon0: MLS_LON0, lat0: MLS_LAT0 });
@@ -1258,7 +1258,7 @@ describe('createGeoreference', () => {
     expect(geoVia.lat).toBeCloseTo(geoDirect.lat, 12);
   });
 
-  it('uses a least-squares similarity extent for an MLS map (D6)', () => {
+  it('uses a least-squares similarity extent for an MLS map', () => {
     const points = mlsGrid();
     const georef = createGeoreference(points);
     expect(georef.type).toBe('mls');

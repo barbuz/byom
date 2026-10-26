@@ -44,7 +44,7 @@ const HALF_TURN = 180;
 const FULL_TURN = 360;
 
 // Moving-least-squares (MLS) warp constants. The grid and step are fixed, not
-// tuned, so the fold test stays a sign check rather than a threshold (D8).
+// tuned, so the fold test stays a sign check rather than a threshold.
 const MLS_NEWTON_ITERATIONS = 20;
 const MLS_NEWTON_TOLERANCE = 1e-9;
 const FOLD_GRID_SIZE = 48;
@@ -684,7 +684,7 @@ function solve2x2(a, b, c, d, e, f) {
  *   s   = num / den
  *   t   = q̄ − s·p̄
  *
- * It is used as the MLS map's `extentTransform` (D6): projecting the image
+ * It is used as the MLS map's `extentTransform`: projecting the image
  * corners through a global similarity gives a plausible footprint where the
  * local warp would extrapolate badly. At least two points are required, which
  * is always true on the MLS path (5+).
@@ -787,8 +787,8 @@ export function computeLeastSquaresSimilarityTransform(points, lon0, lat0) {
  *   f(v) = M (v − p*) + q*
  *
  * The warp is smooth, locally supported and interpolating, so a metro or ski
- * map's piecewise/non-projective warp is represented without a global model
- * (D1–D5). The second factor is a 2x2 inverse, singular exactly when the local
+ * map's piecewise/non-projective warp is represented without a global model.
+ * The second factor is a 2x2 inverse, singular exactly when the local
  * control points are collinear; `sigma_i = 0` (null accuracy) reproduces plain
  * 1/d² interpolating MLS and makes the warp exact at the control points.
  *
@@ -818,7 +818,7 @@ export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
     Number.isFinite(point.accuracy) ? Math.abs(point.accuracy) : 0
   );
 
-  // The global similarity (D6): its inverse seeds the iterative `uvToGeo`, and
+  // The global similarity: its inverse seeds the iterative `uvToGeo`, and
   // its forward map is the fallback where a local fit is singular. It is stable
   // everywhere the local warp is not.
   const extent = computeLeastSquaresSimilarityTransform(
@@ -837,7 +837,7 @@ export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
     // An exact hit on a hand-placed control point (sigma = 0) interpolates
     // directly; the weighted fit is singular there because every weight but
     // this one is finite. A point with sigma > 0 has a finite weight at d = 0,
-    // so it is deliberately softened rather than pinned (D4).
+    // so it is deliberately softened rather than pinned.
     for (let i = 0; i < ground.length; i++) {
       if (sigma[i] === 0 && ground[i].x === x && ground[i].y === y) {
         return { x: image[i].x, y: image[i].y };
@@ -900,8 +900,8 @@ export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
   /**
    * Direct evaluation ground -> image, then back to stored y-down fractions.
    * Where the local fit is singular (collinear control points) it falls back to
-   * the global similarity (D6), matching `uvToGeo`, so a singular configuration
-   * is handled without throwing (Phase 2 exit).
+   * the global similarity, matching `uvToGeo`, so a singular configuration is
+   * handled without throwing.
    */
   function warpGeoToUV(lon, lat) {
     const local = lonLatToLocalMeters(lon, lat, origin.lon0, origin.lat0);
@@ -965,7 +965,7 @@ export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
  * Fold state of a warp over a fixed grid: the finite-difference Jacobian
  * determinant of the ground -> image map. A correctly georeferenced map has a
  * positive determinant everywhere; a misplaced control point folds the warp so
- * some sample has `det <= 0`. This is a sign test (D8), generalising the
+ * some sample has `det <= 0`. This is a sign test, generalising the
  * single-matrix `transformIsMirrored` check to a local warp.
  *
  * 3 warp evaluations per sample over a 48x48 grid is O(N) each and computed
@@ -1031,7 +1031,7 @@ export function computeFoldState(geoToUV, points, lon0, lat0, grid = FOLD_GRID_S
 
 /**
  * Wrap a matrix transform as a Georeference: the warp methods delegate to the
- * matrix implementation and `extentTransform` is the model itself (D6). Kept
+ * matrix implementation and `extentTransform` is the model itself. Kept
  * internal to `createGeoreference`, which is the public entry point.
  * @param {Object} transform - {m, type, lon0, lat0}
  * @returns {Object} Georeference
@@ -1053,12 +1053,12 @@ function createMatrixGeoreference(transform) {
 /**
  * Build the Georeference for a set of reference points: the single interface
  * every consumer holds, so a local warp (no single matrix) and the matrix
- * models share one shape. The model ladder is deterministic (D1):
+ * models share one shape. The model ladder is deterministic:
  *
  *   2 -> similarity, 3 -> affine, 4 -> homography, 5+ -> affine MLS
  *
  * `extentTransform` is the model itself for 2–4 points (preserving today's
- * footprint), and a least-squares similarity fit for MLS maps (D6), so image
+ * footprint), and a least-squares similarity fit for MLS maps, so image
  * corners project to a plausible footprint rather than through the local warp.
  * The fit is resolution-independent: reference points are stored as fractions
  * of `imageDivisor(W, H)`, so pixel dimensions are only needed by the callers

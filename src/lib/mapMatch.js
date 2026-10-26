@@ -65,7 +65,7 @@ function imageCornerFractions(W, H) {
 /**
  * The transform whose image corners bound a map's footprint. For a matrix
  * model this is the model itself; for an MLS map it is the least-squares
- * similarity fit (D6), because the local warp extrapolates badly beyond its
+ * similarity fit, because the local warp extrapolates badly beyond its
  * control points. Falls back to the transform itself when no extent is set.
  * @param {Object} transform - Transform {m,...} or Georeference
  * @returns {Object}
@@ -78,7 +78,7 @@ function extentTransformOf(transform) {
  * Axis-aligned bounds of a map's footprint in its local metric plane. The
  * projected image is convex (a similarity/affine parallelogram or a projective
  * quadrilateral), so the four projected corners bound the whole footprint.
- * Corners are projected through the extent transform (D6), not the local warp.
+ * Corners are projected through the extent transform, not the local warp.
  * @param {Object|null} transform - Transform {m,...} or Georeference
  * @param {number} W
  * @param {number} H
@@ -107,7 +107,7 @@ export function imageCornersToMetricBounds(transform, W, H) {
 
 /**
  * The four projected image corners as lon/lat, for display and as a coarse
- * fallback. Corners are projected through the extent transform (D6). The
+ * fallback. Corners are projected through the extent transform. The
  * min/max below assumes the map does not straddle the antimeridian; callers
  * that only need containment should use the metric bounds and
  * `geoPointInImage` instead, which are wrap-safe.

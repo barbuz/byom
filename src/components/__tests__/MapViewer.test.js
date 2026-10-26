@@ -696,7 +696,7 @@ describe("MapViewer mirrored map warning", () => {
 });
 
 describe("MapViewer moving-least-squares warp", () => {
-  // Five points take the MLS path (D1). A uniform ground grid mapped to a
+  // Five points take the MLS path. A uniform ground grid mapped to a
   // north-up image; swapping two ground positions folds the local warp.
   const MLS_POINTS = [
     { id: 1, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -74.0, lat: 40.0, accuracy: null },

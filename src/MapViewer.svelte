@@ -875,7 +875,7 @@
   // A fitted map should not mirror or fold; if it does, a reference point is
   // almost certainly misplaced, so surface it as a likely error rather than
   // rendering a silently reflected map. Matrix models (2–4 points) keep the
-  // existing mirrored check; an MLS map (5+) reports a folded local warp (D8).
+  // existing mirrored check; an MLS map (5+) reports a folded local warp.
   let geoTransformIsMls = $derived(geoTransform?.type === 'mls');
   let geoTransformMirrored = $derived(
     !geoTransformIsMls && geoTransform ? geoTransform.isFolded() : false,
