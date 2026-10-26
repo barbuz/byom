@@ -874,15 +874,10 @@
   let canCenterOnUser = $derived(Boolean(userPositionMarker?.userPosition && geoTransform));
   // A fitted map should not mirror or fold; if it does, a reference point is
   // almost certainly misplaced, so surface it as a likely error rather than
-  // rendering a silently reflected map. Matrix models (2–4 points) keep the
-  // existing mirrored check; an MLS map (5+) reports a folded local warp.
-  let geoTransformIsMls = $derived(geoTransform?.type === 'mls');
-  let geoTransformMirrored = $derived(
-    !geoTransformIsMls && geoTransform ? geoTransform.isFolded() : false,
-  );
-  let geoTransformFolded = $derived(
-    geoTransformIsMls && geoTransform ? geoTransform.isFolded() : false,
-  );
+  // rendering a silently reflected map. The matrix models (2–4 points) and the
+  // MLS warp (5+) share one folded test; only the wording differs.
+  let geoTransformFolded = $derived(Boolean(geoTransform?.isFolded()));
+  let foldLabel = $derived(geoTransform?.type === 'mls' ? 'Folded' : 'Mirrored');
 </script>
 
 <div class="viewer-container">
@@ -979,13 +974,9 @@
             ✓ Moving-least-squares warp ({referencePoints.length} points)
           {/if}
         </div>
-        {#if geoTransformMirrored}
+        {#if geoTransformFolded}
           <div class="transform-status transform-error">
-            ⚠️ Mirrored map: a reference point is likely misplaced
-          </div>
-        {:else if geoTransformFolded}
-          <div class="transform-status transform-error">
-            ⚠️ Folded map: a reference point is likely misplaced
+            ⚠️ {foldLabel} map: a reference point is likely misplaced
           </div>
         {/if}
       {/if}
@@ -996,13 +987,9 @@
         <div class="points-hint hint-error">
           ⚠️ Georeference unavailable: {geoTransformError}
         </div>
-      {:else if geoTransformMirrored}
-        <div class="points-hint hint-error">
-          ⚠️ Mirrored map: a reference point is likely misplaced
-        </div>
       {:else if geoTransformFolded}
         <div class="points-hint hint-error">
-          ⚠️ Folded map: a reference point is likely misplaced
+          ⚠️ {foldLabel} map: a reference point is likely misplaced
         </div>
       {:else}
         <div class="points-hint">
@@ -1110,15 +1097,9 @@
             </div>
             {#if geoTransform}
               <div class="info-row">
-                <strong>Mirrored:</strong>
-                <span>{geoTransformMirrored ? '⚠️ Yes (check reference points)' : 'No'}</span>
+                <strong>{foldLabel}:</strong>
+                <span>{geoTransformFolded ? '⚠️ Yes (check reference points)' : 'No'}</span>
               </div>
-              {#if geoTransformIsMls}
-                <div class="info-row">
-                  <strong>Folded:</strong>
-                  <span>{geoTransformFolded ? '⚠️ Yes (check reference points)' : 'No'}</span>
-                </div>
-              {/if}
               <div class="info-row">
                 <strong>Transform Data:</strong>
                 <pre>{JSON.stringify(geoTransform, null, 2)}</pre>
