@@ -872,12 +872,11 @@
   let canSavePoint = $derived(pendingReferencePoint && selectedLon !== null && selectedLat !== null);
   let needsMorePoints = $derived(referencePoints.length < 3);
   let canCenterOnUser = $derived(Boolean(userPositionMarker?.userPosition && geoTransform));
-  // A fitted map should not mirror or fold; if it does, a reference point is
-  // almost certainly misplaced, so surface it as a likely error rather than
-  // rendering a silently reflected map. The matrix models (2–4 points) and the
-  // MLS warp (5+) share one folded test; only the wording differs.
+  // A fitted map should not fold; if it does, a reference point is almost
+  // certainly misplaced, so surface it as a likely error rather than rendering
+  // a silently distorted map. The matrix models (2–4 points) and the MLS warp
+  // (5+) share this one test, and the same wording.
   let geoTransformFolded = $derived(Boolean(geoTransform?.isFolded()));
-  let foldLabel = $derived(geoTransform?.type === 'mls' ? 'Folded' : 'Mirrored');
 </script>
 
 <div class="viewer-container">
@@ -976,7 +975,7 @@
         </div>
         {#if geoTransformFolded}
           <div class="transform-status transform-error">
-            ⚠️ {foldLabel} map: a reference point is likely misplaced
+            ⚠️ Folded map: a reference point is likely misplaced
           </div>
         {/if}
       {/if}
@@ -989,7 +988,7 @@
         </div>
       {:else if geoTransformFolded}
         <div class="points-hint hint-error">
-          ⚠️ {foldLabel} map: a reference point is likely misplaced
+          ⚠️ Folded map: a reference point is likely misplaced
         </div>
       {:else}
         <div class="points-hint">
@@ -1097,7 +1096,7 @@
             </div>
             {#if geoTransform}
               <div class="info-row">
-                <strong>{foldLabel}:</strong>
+                <strong>Folded:</strong>
                 <span>{geoTransformFolded ? '⚠️ Yes (check reference points)' : 'No'}</span>
               </div>
               <div class="info-row">
