@@ -660,24 +660,24 @@ describe("MapViewer degenerate georeference", () => {
   });
 });
 
-describe("MapViewer mirrored map warning", () => {
+describe("MapViewer folded map warning", () => {
   // Three points for an affine fit. In a north-up map latitude falls as image v
   // (downward) grows, so the "correct" set is orientation-preserving; the
-  // "mirrored" set flips one latitude, which a swapped/misplaced point yields.
+  // "folded" set flips one latitude, which a swapped/misplaced point yields.
   const CORRECT = [
     { id: 1, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -74.0, lat: 40.0, accuracy: null },
     { id: 2, mapId: 1, u: 700 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -73.0, lat: 40.0, accuracy: null },
     { id: 3, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 500 / IMAGE_DIVISOR, lon: -74.0, lat: 39.0, accuracy: null },
   ];
-  const MIRRORED = CORRECT.map((point, index) =>
+  const FOLDED = CORRECT.map((point, index) =>
     index === 2 ? { ...point, lat: 41.0 } : point);
 
-  it("warns that a reference point is likely misplaced when the fit mirrors", async () => {
-    getReferencePoints.mockResolvedValue(MIRRORED);
+  it("warns that a reference point is likely misplaced when the fit folds", async () => {
+    getReferencePoints.mockResolvedValue(FOLDED);
     await mountViewer();
     await sleep(30);
 
-    await screen.findByText(/Mirrored map: a reference point is likely misplaced/);
+    await screen.findByText(/Folded map: a reference point is likely misplaced/);
     // The transform itself is still shown, not reported as unavailable.
     assert.equal(screen.queryByText(/Georeference unavailable/), null);
   });
@@ -690,8 +690,54 @@ describe("MapViewer mirrored map warning", () => {
     fireEvent.click(screen.getByText(/Points \(3\)/));
     await flushPromises();
 
-    assert.equal(screen.queryByText(/Mirrored map/), null);
+    assert.equal(screen.queryByText(/Folded map/), null);
     await screen.findByText(/Affine transform/);
+  });
+});
+
+describe("MapViewer moving-least-squares warp", () => {
+  // Five points take the MLS path. A uniform ground grid mapped to a
+  // north-up image; swapping two ground positions folds the local warp.
+  const MLS_POINTS = [
+    { id: 1, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -74.0, lat: 40.0, accuracy: null },
+    { id: 2, mapId: 1, u: 700 / IMAGE_DIVISOR, v: 100 / IMAGE_DIVISOR, lon: -73.0, lat: 40.0, accuracy: null },
+    { id: 3, mapId: 1, u: 100 / IMAGE_DIVISOR, v: 500 / IMAGE_DIVISOR, lon: -74.0, lat: 39.0, accuracy: null },
+    { id: 4, mapId: 1, u: 700 / IMAGE_DIVISOR, v: 500 / IMAGE_DIVISOR, lon: -73.0, lat: 39.0, accuracy: null },
+    { id: 5, mapId: 1, u: 400 / IMAGE_DIVISOR, v: 300 / IMAGE_DIVISOR, lon: -73.5, lat: 39.5, accuracy: null },
+  ];
+  const FOLDED = MLS_POINTS.map((point) =>
+    point.id === 3 ? { ...point, lon: -74.0, lat: 40.5 } : point);
+
+  it("labels the model as a moving-least-squares warp for 5+ points", async () => {
+    getReferencePoints.mockResolvedValue(MLS_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(screen.getByText(/Points \(5\)/));
+    await flushPromises();
+
+    await screen.findByText(/Moving-least-squares warp \(5 points\)/);
+    assert.equal(screen.queryByText(/Homography transform/), null);
+  });
+
+  it("warns that a reference point is likely misplaced when the warp folds", async () => {
+    getReferencePoints.mockResolvedValue(FOLDED);
+    await mountViewer();
+    await sleep(30);
+
+    await screen.findByText(/Folded map: a reference point is likely misplaced/);
+    assert.equal(screen.queryByText(/Georeference unavailable/), null);
+  });
+
+  it("does not warn for a correctly mapped MLS warp", async () => {
+    getReferencePoints.mockResolvedValue(MLS_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(screen.getByText(/Points \(5\)/));
+    await flushPromises();
+
+    assert.equal(screen.queryByText(/Folded map/), null);
   });
 });
 

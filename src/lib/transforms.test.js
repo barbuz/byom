@@ -6,6 +6,10 @@ import {
   uvToGeo,
   geoToUV,
   calculateTransform,
+  createGeoreference,
+  computeMLSWarp,
+  computeLeastSquaresSimilarityTransform,
+  computeFoldState,
   geoDistanceToUV,
   imageDivisor,
   metersPerDegreeLon,
@@ -974,5 +978,321 @@ describe('uvToGeo and geoToUV error cases', () => {
     const img = geoToUV(nearHorizon.lon, nearHorizon.lat, projective);
     expect(Number.isFinite(img.u)).toBe(true);
     expect(Number.isFinite(img.v)).toBe(true);
+  });
+});
+
+// A ground plane at 45N and a north-up image frame, used by the MLS tests.
+// Ground metres (E, N) map to image fractions via `frac`, and the ground
+// coordinate is built with `toLonLat`. A 5x5 control grid spans +/- 4 km.
+const MLS_LON0 = 8;
+const MLS_LAT0 = 45;
+const mlsToLonLat = (east, north) => localMetersToLonLat(east, north, MLS_LON0, MLS_LAT0);
+const mlsFrac = (east, north) => ({ u: 0.5 + east / 10000, v: 0.5 - north / 10000 });
+function mlsPoint(east, north, accuracy = null) {
+  const { u, v } = mlsFrac(east, north);
+  const { lon, lat } = mlsToLonLat(east, north);
+  return { u, v, lon, lat, accuracy };
+}
+function mlsGrid() {
+  const points = [];
+  for (let i = -2; i <= 2; i++) {
+    for (let j = -2; j <= 2; j++) {
+      points.push(mlsPoint(i * 2000, j * 2000));
+    }
+  }
+  return points;
+}
+
+// A deliberately non-projective map: a uniform ground grid whose image is
+// warped by a quadratic radial term, so no single homography (let alone
+// affine) fits it. This is the metro/ski case the MLS warp exists for.
+function warpedPoint(east, north) {
+  const { lon, lat } = mlsToLonLat(east, north);
+  const bx = east / 10000;
+  const by = -north / 10000;
+  const r2 = bx * bx + by * by;
+  const u = 0.5 + bx + 0.15 * (bx * bx - by * by) + 0.05 * r2 * bx;
+  const v = 0.5 + by + 0.15 * (2 * bx * by);
+  return { u, v, lon, lat, accuracy: null };
+}
+function warpedGrid() {
+  const points = [];
+  for (let i = -2; i <= 2; i++) {
+    for (let j = -2; j <= 2; j++) {
+      points.push(warpedPoint(i * 2000, j * 2000));
+    }
+  }
+  return points;
+}
+
+describe('computeLeastSquaresSimilarityTransform', () => {
+  it('recovers the exact similarity from exactly-similarity correspondences', () => {
+    const points = [
+      mlsPoint(-2000, -1000),
+      mlsPoint(2000, -1000),
+      mlsPoint(2000, 3000),
+      mlsPoint(-2000, 3000),
+    ];
+    const t = computeLeastSquaresSimilarityTransform(points, MLS_LON0, MLS_LAT0);
+    expect(t.type).toBe('similarity');
+    expect(t.m[6]).toBe(0);
+    expect(t.m[7]).toBe(0);
+    // The fit is exact, so every control point maps back to itself.
+    for (const point of points) {
+      const uv = geoToUV(point.lon, point.lat, t);
+      expect(uv.u).toBeCloseTo(point.u, 9);
+      expect(uv.v).toBeCloseTo(point.v, 9);
+    }
+  });
+
+  it('fits a similarity exactly from three or more correspondences', () => {
+    const points = [
+      mlsPoint(-2000, 0),
+      mlsPoint(0, 0),
+      mlsPoint(2000, 0),
+    ];
+    const t = computeLeastSquaresSimilarityTransform(points, MLS_LON0, MLS_LAT0);
+    for (const point of points) {
+      const uv = geoToUV(point.lon, point.lat, t);
+      expect(uv.u).toBeCloseTo(point.u, 9);
+      expect(uv.v).toBeCloseTo(point.v, 9);
+    }
+  });
+
+  it('throws for fewer than two points and for coincident ground points', () => {
+    expect(() => computeLeastSquaresSimilarityTransform([mlsPoint(0, 0)], MLS_LON0, MLS_LAT0))
+      .toThrow('Need at least 2 reference points');
+    const coincident = [
+      { u: 0, v: 0, lon: MLS_LON0, lat: MLS_LAT0 },
+      { u: 1, v: 1, lon: MLS_LON0, lat: MLS_LAT0 },
+    ];
+    expect(() => computeLeastSquaresSimilarityTransform(coincident, MLS_LON0, MLS_LAT0))
+      .toThrow('Reference points must be distinct');
+  });
+
+  it('rejects non-finite coordinates', () => {
+    const bad = [mlsPoint(0, 0), { u: 1, v: 0, lon: null, lat: 45 }];
+    expect(() => computeLeastSquaresSimilarityTransform(bad, MLS_LON0, MLS_LAT0))
+      .toThrow('Reference points must have finite coordinates');
+  });
+
+  it('throws when the image points do not vary (degenerate image spread)', () => {
+    // Ground positions differ but every image point is identical, so the
+    // similarity's rotation block collapses to zero.
+    const points = [
+      { u: 0.5, v: 0.5, lon: MLS_LON0, lat: MLS_LAT0 },
+      { u: 0.5, v: 0.5, lon: MLS_LON0 + 0.01, lat: MLS_LAT0 },
+      { u: 0.5, v: 0.5, lon: MLS_LON0, lat: MLS_LAT0 + 0.01 },
+    ];
+    expect(() => computeLeastSquaresSimilarityTransform(points, MLS_LON0, MLS_LAT0))
+      .toThrow('Reference points must be distinct');
+  });
+});
+
+describe('computeMLSWarp', () => {
+  it('requires at least five points', () => {
+    expect(() => computeMLSWarp(mlsGrid().slice(0, 4))).toThrow('Need at least 5 reference points for an MLS warp');
+  });
+
+  it('is exact at every control point when accuracy is null (sigma = 0)', () => {
+    const points = mlsGrid();
+    const warp = computeMLSWarp(points, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    for (const point of points) {
+      const uv = warp.geoToUV(point.lon, point.lat);
+      expect(uv.u).toBeCloseTo(point.u, 9);
+      expect(uv.v).toBeCloseTo(point.v, 9);
+    }
+  });
+
+  it('derives its own plane origin when none is supplied', () => {
+    const points = mlsGrid();
+    const warp = computeMLSWarp(points);
+    const origin = planeOrigin(points);
+    expect(warp.lon0).toBeCloseTo(origin.lon0, 12);
+    expect(warp.lat0).toBeCloseTo(origin.lat0, 12);
+  });
+
+  it('round-trips an interior point through geoToUV and uvToGeo', () => {
+    const warp = computeMLSWarp(mlsGrid(), { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    const ground = mlsToLonLat(500, 700);
+    const uv = warp.geoToUV(ground.lon, ground.lat);
+    const back = warp.uvToGeo(uv.u, uv.v);
+    expect(back.lon).toBeCloseTo(ground.lon, 6);
+    expect(back.lat).toBeCloseTo(ground.lat, 6);
+  });
+
+  it('exposes the control points it was built from', () => {
+    const points = mlsGrid();
+    const warp = computeMLSWarp(points, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    expect(warp.points).toBe(points);
+  });
+
+  it('treats a non-finite accuracy as sigma = 0 rather than NaN', () => {
+    const points = mlsGrid();
+    points[12].accuracy = null;
+    const warp = computeMLSWarp(points, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    const uv = warp.geoToUV(points[12].lon, points[12].lat);
+    expect(uv.u).toBeCloseTo(points[12].u, 9);
+  });
+
+  it('falls back to the global similarity for a singular (collinear) local fit', () => {
+    // Control points along one diagonal make every local fit singular away from
+    // the exact control-point hits; the warp then falls back to the extent
+    // similarity rather than throwing.
+    const collinear = [];
+    for (let i = -2; i <= 2; i++) collinear.push(mlsPoint(i * 1000, i * 1000));
+    const warp = computeMLSWarp(collinear, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    const query = mlsToLonLat(500, 300);
+    const uv = warp.geoToUV(query.lon, query.lat);
+    expect(Number.isFinite(uv.u)).toBe(true);
+    expect(Number.isFinite(uv.v)).toBe(true);
+    // The fallback is the least-squares similarity evaluated at the query.
+    const seed = computeLeastSquaresSimilarityTransform(collinear, MLS_LON0, MLS_LAT0);
+    const expected = geoToUV(query.lon, query.lat, seed);
+    expect(uv.u).toBeCloseTo(expected.u, 12);
+    expect(uv.v).toBeCloseTo(expected.v, 12);
+  });
+
+  it('falls back to the global fit when the inverse cannot converge', () => {
+    // The same collinear configuration: uvToGeo cannot Newton-solve, so it
+    // returns the seed from the least-squares similarity instead of throwing.
+    const collinear = [];
+    for (let i = -2; i <= 2; i++) collinear.push(mlsPoint(i * 1000, i * 1000));
+    const warp = computeMLSWarp(collinear, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    const back = warp.uvToGeo(0.5, 0.5);
+    expect(Number.isFinite(back.lon)).toBe(true);
+    expect(Number.isFinite(back.lat)).toBe(true);
+  });
+
+  it('handles a null accuracy on every point (plain 1/d^2 MLS)', () => {
+    const points = mlsGrid();
+    for (const point of points) point.accuracy = null;
+    const warp = computeMLSWarp(points, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    const uv = warp.geoToUV(points[0].lon, points[0].lat);
+    expect(uv.u).toBeCloseTo(points[0].u, 9);
+  });
+
+  it('softens a control point by its accuracy, so sigma > 0 is not pinned', () => {
+    // A query exactly at a control point with a large accuracy is pulled toward
+    // its neighbours: the result is not that point's image coordinate.
+    const points = mlsGrid();
+    points[12].accuracy = 4000;
+    const warp = computeMLSWarp(points, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    const uv = warp.geoToUV(points[12].lon, points[12].lat);
+    const drift = Math.hypot(uv.u - points[12].u, uv.v - points[12].v);
+    expect(drift).toBeGreaterThan(0);
+    // Still finite and near the map, not NaN.
+    expect(Number.isFinite(uv.u)).toBe(true);
+  });
+
+  it('Newton-inverts a genuinely non-projective warp', () => {
+    // A quadratic radial warp (a deliberately non-projective metro/ski map):
+    // the affine MLS fits it exactly at the control points, but between them
+    // the map is curved, so the inverse must iterate rather than trust the
+    // global similarity seed.
+    const points = warpedGrid();
+    const warp = computeMLSWarp(points, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    for (const [east, north] of [[-3000, -3000], [-1000, 0], [500, 1500], [3000, 2500]]) {
+      const ground = mlsToLonLat(east, north);
+      const uv = warp.geoToUV(ground.lon, ground.lat);
+      const back = warp.uvToGeo(uv.u, uv.v);
+      expect(back.lon).toBeCloseTo(ground.lon, 8);
+      expect(back.lat).toBeCloseTo(ground.lat, 8);
+    }
+  });
+});
+
+describe('computeFoldState', () => {
+  it('reports a correct map as not folded with a positive minimum determinant', () => {
+    const points = mlsGrid();
+    const warp = computeMLSWarp(points, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    const state = computeFoldState(warp.geoToUV, points, MLS_LON0, MLS_LAT0);
+    expect(state.folded).toBe(false);
+    expect(state.minDet).toBeGreaterThan(0);
+  });
+
+  it('flags a folded warp when a control point is misplaced', () => {
+    const points = mlsGrid();
+    // Swap the ground positions of two control points, folding the warp.
+    [points[0].lon, points[6].lon] = [points[6].lon, points[0].lon];
+    [points[0].lat, points[6].lat] = [points[6].lat, points[0].lat];
+    const warp = computeMLSWarp(points, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    const state = computeFoldState(warp.geoToUV, points, MLS_LON0, MLS_LAT0);
+    expect(state.folded).toBe(true);
+  });
+});
+
+describe('createGeoreference', () => {
+  it('returns null with fewer than two points', () => {
+    expect(createGeoreference([])).toBeNull();
+    expect(createGeoreference(null)).toBeNull();
+  });
+
+  it('follows the model ladder: 2 similarity, 3 affine, 4 homography, 5+ mls', () => {
+    const corners = [
+      mlsPoint(-2000, -2000),
+      mlsPoint(2000, -2000),
+      mlsPoint(-2000, 2000),
+      mlsPoint(2000, 2000),
+      mlsPoint(0, 0),
+    ];
+    expect(createGeoreference(corners.slice(0, 2)).type).toBe('similarity');
+    expect(createGeoreference(corners.slice(0, 3)).type).toBe('affine');
+    expect(createGeoreference(corners.slice(0, 4)).type).toBe('homography');
+    expect(createGeoreference(corners.slice(0, 5)).type).toBe('mls');
+  });
+
+  it('wraps a matrix model with a matrix extent and the mirrored fold check', () => {
+    const points = [mlsPoint(-2000, -2000), mlsPoint(2000, -2000), mlsPoint(-2000, 2000)];
+    const georef = createGeoreference(points);
+    expect(georef.extentTransform.m).toHaveLength(9);
+    expect(georef.extentTransform.type).toBe('affine');
+    expect(georef.isFolded()).toBe(false);
+    // The warp methods agree with the matrix implementation.
+    const direct = geoToUV(points[0].lon, points[0].lat, georef.extentTransform);
+    const viaGeoref = georef.geoToUV(points[0].lon, points[0].lat);
+    expect(viaGeoref.u).toBeCloseTo(direct.u, 12);
+    const geoDirect = uvToGeo(points[0].u, points[0].v, georef.extentTransform);
+    const geoVia = georef.uvToGeo(points[0].u, points[0].v);
+    expect(geoVia.lon).toBeCloseTo(geoDirect.lon, 12);
+    expect(geoVia.lat).toBeCloseTo(geoDirect.lat, 12);
+  });
+
+  it('uses a least-squares similarity extent for an MLS map', () => {
+    const points = mlsGrid();
+    const georef = createGeoreference(points);
+    expect(georef.type).toBe('mls');
+    expect(georef.extentTransform.type).toBe('similarity');
+    expect(georef.isFolded()).toBe(false);
+    // Exact at a control point through the closure.
+    const uv = georef.geoToUV(points[0].lon, points[0].lat);
+    expect(uv.u).toBeCloseTo(points[0].u, 9);
+  });
+
+  it('reports a folded MLS map through isFolded', () => {
+    const points = mlsGrid();
+    [points[0].lon, points[6].lon] = [points[6].lon, points[0].lon];
+    [points[0].lat, points[6].lat] = [points[6].lat, points[0].lat];
+    const georef = createGeoreference(points);
+    expect(georef.isFolded()).toBe(true);
+  });
+
+  it('routes the module-level uvToGeo/geoToUV through a georeference', () => {
+    const points = mlsGrid();
+    const georef = createGeoreference(points);
+    const uv = geoToUV(points[3].lon, points[3].lat, georef);
+    expect(uv.u).toBeCloseTo(points[3].u, 9);
+    const geo = uvToGeo(points[3].u, points[3].v, georef);
+    expect(geo.lon).toBeCloseTo(points[3].lon, 6);
+    expect(geo.lat).toBeCloseTo(points[3].lat, 6);
+  });
+
+  it('propagates a singular matrix model error', () => {
+    const coincident = [
+      { u: 0, v: 0, lon: MLS_LON0, lat: MLS_LAT0 },
+      { u: 1, v: 1, lon: MLS_LON0, lat: MLS_LAT0 },
+    ];
+    expect(() => createGeoreference(coincident))
+      .toThrow('Reference points must be distinct');
   });
 });

@@ -1,6 +1,6 @@
 <script>
   import { getMap, getReferencePoints } from './lib/db.js';
-  import { calculateTransform, geoToUV, geoDistanceToUV, imageDivisor, transformIsMirrored } from './lib/transforms.js';
+  import { createGeoreference, geoToUV, geoDistanceToUV, imageDivisor } from './lib/transforms.js';
   import { screenToImage, getPointAtScreen, pinchZoomTransform, centerOnImagePoint } from './lib/viewport.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
@@ -313,7 +313,7 @@
 
   function updateGeoTransform() {
     try {
-      geoTransform = calculateTransform(referencePoints);
+      geoTransform = createGeoreference(referencePoints);
       geoTransformError = null;
     } catch (error) {
       // A degenerate point set (e.g. two points sharing GPS coordinates but
@@ -564,13 +564,13 @@
 
   /**
    * Return the fitter's error message for a candidate point set, or null when
-   * it georeferences cleanly. Reusing calculateTransform's own validation
+   * it georeferences cleanly. Reusing createGeoreference's own validation
    * catches every degenerate case (duplicate GPS coordinates, collinear
    * points, ...), not just the ones enumerated here.
    */
   function transformErrorFor(points) {
     try {
-      calculateTransform(points);
+      createGeoreference(points);
       return null;
     } catch (error) {
       return error.message;
@@ -872,10 +872,11 @@
   let canSavePoint = $derived(pendingReferencePoint && selectedLon !== null && selectedLat !== null);
   let needsMorePoints = $derived(referencePoints.length < 3);
   let canCenterOnUser = $derived(Boolean(userPositionMarker?.userPosition && geoTransform));
-  // A fitted map should not mirror; if it does, a reference point is almost
+  // A fitted map should not fold; if it does, a reference point is almost
   // certainly misplaced, so surface it as a likely error rather than rendering
-  // a silently reflected map.
-  let geoTransformMirrored = $derived(transformIsMirrored(geoTransform));
+  // a silently distorted map. The matrix models (2–4 points) and the MLS warp
+  // (5+) share this one test, and the same wording.
+  let geoTransformFolded = $derived(Boolean(geoTransform?.isFolded()));
 </script>
 
 <div class="viewer-container">
@@ -966,13 +967,15 @@
             ✓ Similarity transform
           {:else if referencePoints.length === 3}
             ✓ Affine transform ({referencePoints.length} points)
-          {:else if referencePoints.length >= 4}
+          {:else if referencePoints.length === 4}
             ✓ Homography transform ({referencePoints.length} points)
+          {:else}
+            ✓ Moving-least-squares warp ({referencePoints.length} points)
           {/if}
         </div>
-        {#if geoTransformMirrored}
+        {#if geoTransformFolded}
           <div class="transform-status transform-error">
-            ⚠️ Mirrored map: a reference point is likely misplaced
+            ⚠️ Folded map: a reference point is likely misplaced
           </div>
         {/if}
       {/if}
@@ -983,9 +986,9 @@
         <div class="points-hint hint-error">
           ⚠️ Georeference unavailable: {geoTransformError}
         </div>
-      {:else if geoTransformMirrored}
+      {:else if geoTransformFolded}
         <div class="points-hint hint-error">
-          ⚠️ Mirrored map: a reference point is likely misplaced
+          ⚠️ Folded map: a reference point is likely misplaced
         </div>
       {:else}
         <div class="points-hint">
@@ -1093,8 +1096,8 @@
             </div>
             {#if geoTransform}
               <div class="info-row">
-                <strong>Mirrored:</strong>
-                <span>{geoTransformMirrored ? '⚠️ Yes (check reference points)' : 'No'}</span>
+                <strong>Folded:</strong>
+                <span>{geoTransformFolded ? '⚠️ Yes (check reference points)' : 'No'}</span>
               </div>
               <div class="info-row">
                 <strong>Transform Data:</strong>

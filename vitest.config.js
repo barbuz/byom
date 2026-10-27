@@ -61,7 +61,7 @@ export default defineConfig({
         'src/components/UserPositionMarker.svelte': { lines: 100 },
         'src/components/PdfPagePicker.svelte': { lines: 100 },
         'src/lib/pdf.js': { lines: 100 },
-        'src/MapViewer.svelte': { lines:  87 },
+        'src/MapViewer.svelte': { lines:  88 },
         'src/MapList.svelte': { lines:  95 },
       },
     },
