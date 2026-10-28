@@ -136,11 +136,21 @@ starting at `0` each month and incrementing for subsequent releases that month:
 
 CalVer suits a continuously deployed app with no public API: the version tells
 you *when* rather than inventing a compatibility guarantee nobody consumes.
-Bump `version` in `package.json` as part of the release PR and keep
-`package-lock.json` in sync (`npm install` does this). The
-[`tag-release` workflow](.github/workflows/tag-release.yml) then tags the merge
-commit on `main` automatically and publishes a GitHub Release — you do not run
-`git tag` by hand.
+
+**Every user-facing change bumps the version in the same PR.** A change is
+user-facing if it alters what a user can see or do — UI, behaviour, rendering,
+georeferencing results, offline/service-worker behaviour. Internal-only changes
+(tests, docs, CI, refactors with no behaviour change) do not. Bump `version` in
+`package.json` and keep `package-lock.json` in sync (`npm install
+--package-lock-only` updates both `version` fields). Take the number from the
+release date, not the size of the change.
+
+Do not rely on CI to catch a missed bump: the
+[`tag-release` workflow](.github/workflows/tag-release.yml) compares the version
+against its parent commit and *skips silently* when it is unchanged, so the
+change ships with no tag and no GitHub Release. When the version does change,
+the workflow tags the merge commit on `main` automatically and publishes a
+GitHub Release — you do not run `git tag` by hand.
 
 Because the version is mapped to `__APP_VERSION__` at build time
 (see `vite.config.js`), it is rendered in the MapList footer, which makes it
