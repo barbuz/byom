@@ -19,7 +19,7 @@ npm run test:watch   # vitest watch mode
 npm run test:coverage # vitest run --coverage (per-file thresholds)
 ```
 
-CI (.github/workflows/test.yml): Node 20, `npm ci`, `npm run build`, `npm run test:coverage`.
+CI (.github/workflows/test.yml): Node 22, `npm ci`, `npm run build`, `npm run test:coverage`.
 
 ## Project Structure
 
@@ -41,7 +41,7 @@ tests/
 public/
 ├── sw.js                         # Service worker (offline caching)
 ├── manifest.json                 # PWA manifest (path prefix /byom/)
-.github/workflows/              # test.yml, deploy.yml (GitHub Pages, opencode.yml)
+.github/workflows/              # test.yml, deploy.yml (GitHub Pages), tag-release.yml
 ```
 
 `src/lib/` holds pure ES modules: `db.js` (IndexedDB wrapper), `transforms.js` (similarity/affine/homography georeferencing), `viewport.js` (screen/image coordinate math, pinch-zoom), `draw.js` (canvas rendering, takes a `ctx`), `mapMatch.js` (landing-page containment/classification/sorting), `geolocation.js` (shared GPS watch + stale-fix watchdog), `pdf.js` (rasterise a PDF page to a PNG blob for import).
@@ -127,6 +127,8 @@ which lives in IndexedDB and survives all updates.
 - `vite.config.js`: `base: '/byom/'` (GitHub Pages); HTTPS dev server uses `localhost-key.pem` and `localhost-cert.pem`; `host: true` for LAN testing.
 - Service worker registers at `/byom/sw.js` in `src/main.js`; keep in sync with `base` and `public/manifest.json`.
 - `deploy.yml` deploys `dist/` to GitHub Pages on pushes to `main`; use feature branches for dev work.
+- Workflows use the `ubuntu-latest` label and keep it unpinned; a future runner-image migration is handled reactively if it ever causes trouble.
+- Workflow actions are pinned to their latest major tags, all of which run on the Node 24 runtime (checkout v7, setup-node v7, configure-pages v6, upload-pages-artifact v5, deploy-pages v5). Keep them off Node 20 majors, which GitHub warns about.
 
 ## Gotchas
 
