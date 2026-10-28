@@ -93,9 +93,19 @@ Run tests: `npm test` or `npm run test:coverage`. Test glob: `src/**/*.test.js` 
 
 Three independent identifiers — do not conflate them:
 
-- **App version**: CalVer `YYYY.M.PATCH` in `package.json` (e.g. `2026.9.0`).
-  Bump it in the release PR and keep `package-lock.json` in sync. Surfaced in
-  the UI via the `__APP_VERSION__` define, which is set in **both**
+- **App version**: CalVer `YYYY.M.PATCH` in `package.json` (e.g. `2026.10.0`).
+  **Every user-facing change must bump this in the same PR.** A change is
+  user-facing if it alters what a user can see or do — UI, behaviour, rendering,
+  georeferencing results, offline/service-worker behaviour. Internal-only
+  changes (tests, docs, CI, pure refactors with no behaviour change) do not.
+  Keep `package-lock.json` in sync (`npm install --package-lock-only` updates
+  both `version` fields). Pick the number from the release date, not the size of
+  the change: `YYYY` = release year, `M` = release month (no zero padding),
+  `PATCH` = 0 for the first release that month, then 1, 2, … for later releases
+  that same month. **If the bump is missing, nothing fails loudly**: the
+  `tag-release` workflow compares `HEAD` to `HEAD^` and simply skips an
+  unchanged version, so the change ships with no tag and no GitHub Release.
+  Surfaced in the UI via the `__APP_VERSION__` define, which is set in **both**
   `vite.config.js` and `vitest.config.js` — keep those two in sync. Tagging is
   automated by `.github/workflows/tag-release.yml`; never tag by hand.
 - **Build id**: commit SHA (`GITHUB_SHA`), injected into `public/sw.js` by the
