@@ -88,6 +88,20 @@ describe("UserPositionMarker", () => {
     assert.equal(after, 0);
   });
 
+  it("exposes GPS diagnostics and updates them on each fix", async () => {
+    const scheduleRender = vi.fn();
+    const result = render(UserPositionMarker, { props: { scheduleRender } });
+    const component = result.component;
+    assert.ok(component.gpsDiagnostics);
+    assert.equal(component.gpsDiagnostics.fixCount, 0);
+    assert.equal(component.gpsDiagnostics.active, true);
+
+    emitPosition({ latitude: 12.3, longitude: 45.6, accuracy: 7.8 });
+    await flushPromises();
+    assert.equal(component.gpsDiagnostics.fixCount, 1);
+    assert.equal(typeof component.gpsDiagnostics.lastFixAt, "number");
+  });
+
   it("warns and does not watch when geolocation is unsupported", () => {
     const scheduleRender = vi.fn();
     const warnSpy = vi.spyOn(console, "warn");
