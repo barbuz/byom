@@ -15,9 +15,10 @@
   // GPS state
   let userPosition = $state(null);
   let positionStale = $state(false);
+  let gpsDiagnostics = $state(null);
 
   // Expose state to parent
-  export { userPosition, positionStale };
+  export { userPosition, positionStale, gpsDiagnostics };
 
   onMount(() => {
     const watch = createPositionWatch({
@@ -30,6 +31,9 @@
       },
       onResume: () => {
         scheduleRender();
+      },
+      onDiagnostics: (diagnostics) => {
+        gpsDiagnostics = diagnostics;
       },
     });
 

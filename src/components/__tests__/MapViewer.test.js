@@ -833,4 +833,49 @@ describe("MapViewer stale GPS", () => {
 
     await screen.findByText(/Stale fix/);
   });
+
+  it("debug modal shows watchdog diagnostics and the re-arm reason", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+
+    const id = firstWatchId();
+    globalThis.__geolocationTestUtil.emitWatchPosition(id, {
+      latitude: 40.5,
+      longitude: -73.5,
+      accuracy: 20,
+    });
+    await flushPromises();
+
+    fireEvent.click(screen.getByText(/Debug/));
+    await screen.findByText(/GPS Watchdog/);
+    await screen.findByText(/Fixes received:/);
+    await screen.findByText(/Watchdog re-arms:/);
+
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+
+    await screen.findByText(/fix went stale/);
+  });
+
+  it("debug modal flags repeated coordinates as a possibly frozen fix", async () => {
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+
+    const id = firstWatchId();
+    globalThis.__geolocationTestUtil.emitWatchPosition(id, {
+      latitude: 40.5,
+      longitude: -73.5,
+      accuracy: 20,
+    });
+    globalThis.__geolocationTestUtil.emitWatchPosition(id, {
+      latitude: 40.5,
+      longitude: -73.5,
+      accuracy: 20,
+    });
+    await flushPromises();
+
+    fireEvent.click(screen.getByText(/Debug/));
+    await screen.findByText(/Repeated coordinates/);
+  });
 });

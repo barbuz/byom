@@ -642,6 +642,36 @@
     showingDebug = !showingDebug;
   }
 
+  // Ticks while the debug window is open so "time since last fix" advances
+  // without waiting for the next GPS callback (which may never come).
+  let debugNow = $state(Date.now());
+  $effect(() => {
+    if (!showingDebug) return;
+    debugNow = Date.now();
+    const id = setInterval(() => { debugNow = Date.now(); }, 1000);
+    return () => clearInterval(id);
+  });
+
+  let gpsDiag = $derived(userPositionMarker?.gpsDiagnostics ?? null);
+
+  const REARM_REASON_LABELS = {
+    'no-fix-timeout': 'no fix within timeout',
+    'stale-fix': 'fix went stale',
+    resume: 'page resumed',
+  };
+
+  function formatClock(ts) {
+    if (!ts) return '—';
+    return new Date(ts).toLocaleTimeString();
+  }
+
+  function formatAge(ms) {
+    if (ms === null || ms === undefined) return '—';
+    const seconds = Math.max(0, Math.round(ms / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    return `${Math.floor(seconds / 60)}m ${seconds % 60}s`;
+  }
+
   function showCoordinateSelection() {
     showingCoordinateSelection = true;
     coordinateMethod = null;
@@ -1083,6 +1113,56 @@
           {:else}
             <div class="debug-info">
               <em>No GPS data available</em>
+            </div>
+          {/if}
+        </div>
+
+        <div class="debug-section">
+          <h3>GPS Watchdog</h3>
+          {#if gpsDiag}
+            <div class="debug-info">
+              <div class="info-row">
+                <strong>Watch active:</strong>
+                <span>{gpsDiag.active ? 'Yes' : 'No'}</span>
+              </div>
+              <div class="info-row">
+                <strong>Fixes received:</strong>
+                <span>{gpsDiag.fixCount}</span>
+              </div>
+              <div class="info-row">
+                <strong>Last fix:</strong>
+                {#if gpsDiag.lastFixAt}
+                  <span>{formatClock(gpsDiag.lastFixAt)} ({formatAge(debugNow - gpsDiag.lastFixAt)} ago)</span>
+                {:else}
+                  <span>none yet ({formatAge(debugNow - gpsDiag.watchStartedAt)} since watch start)</span>
+                {/if}
+              </div>
+              <div class="info-row">
+                <strong>Current watch since:</strong>
+                <span>{formatClock(gpsDiag.watchStartedAt)}</span>
+              </div>
+              <div class="info-row">
+                <strong>Watchdog re-arms:</strong>
+                <span>{gpsDiag.rearmCount}{gpsDiag.lastRearmReason ? ` (last: ${REARM_REASON_LABELS[gpsDiag.lastRearmReason] ?? gpsDiag.lastRearmReason} at ${formatClock(gpsDiag.lastRearmAt)})` : ''}</span>
+              </div>
+              <div class="info-row">
+                <strong>Identical fixes in a row:</strong>
+                <span>{gpsDiag.repeatFixStreak}</span>
+              </div>
+              {#if gpsDiag.repeatFixStreak > 0}
+                <div class="info-row">
+                  <strong>Note:</strong>
+                  <span>⚠️ Repeated coordinates — the fix may be frozen even though it keeps arriving</span>
+                </div>
+              {/if}
+              <div class="info-row">
+                <strong>Errors:</strong>
+                <span>{gpsDiag.errorCount}{gpsDiag.lastError ? ` (last: ${gpsDiag.lastError} at ${formatClock(gpsDiag.lastErrorAt)})` : ''}</span>
+              </div>
+            </div>
+          {:else}
+            <div class="debug-info">
+              <em>No watchdog data available</em>
             </div>
           {/if}
         </div>

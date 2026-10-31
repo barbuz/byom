@@ -81,6 +81,126 @@ describe('createPositionWatch', () => {
   });
 });
 
+describe('createPositionWatch diagnostics', () => {
+  it('exposes an initial snapshot with no fixes or re-arms', () => {
+    const watch = createPositionWatch({});
+    const diag = watch.getDiagnostics();
+    expect(diag.active).toBe(true);
+    expect(diag.fixCount).toBe(0);
+    expect(diag.lastFixAt).toBeNull();
+    expect(diag.rearmCount).toBe(0);
+    expect(diag.lastRearmReason).toBeNull();
+    expect(diag.errorCount).toBe(0);
+    expect(diag.lastError).toBeNull();
+    expect(typeof diag.watchStartedAt).toBe('number');
+    watch.stop();
+  });
+
+  it('counts fixes and reports the last fix time', () => {
+    useWatchdogTimers();
+    const onChange = vi.fn();
+    const watch = createPositionWatch({ onChange });
+    const id = watchIds()[0];
+    emit(id, { latitude: 1, longitude: 2, accuracy: 3 });
+    emit(id, { latitude: 4, longitude: 5, accuracy: 6 });
+
+    const diag = watch.getDiagnostics();
+    expect(diag.fixCount).toBe(2);
+    expect(typeof diag.lastFixAt).toBe('number');
+    watch.stop();
+  });
+
+  it('counts consecutive identical fixes as a repeat streak', () => {
+    const watch = createPositionWatch({});
+    const id = watchIds()[0];
+    emit(id, { latitude: 1, longitude: 2, accuracy: 3 });
+    expect(watch.getDiagnostics().repeatFixStreak).toBe(0);
+
+    emit(id, { latitude: 1, longitude: 2, accuracy: 3 });
+    emit(id, { latitude: 1, longitude: 2, accuracy: 3 });
+    expect(watch.getDiagnostics().repeatFixStreak).toBe(2);
+
+    emit(id, { latitude: 9, longitude: 9, accuracy: 3 });
+    expect(watch.getDiagnostics().repeatFixStreak).toBe(0);
+    watch.stop();
+  });
+
+  it('records the re-arm reason and count when no fix ever arrives', async () => {
+    useWatchdogTimers();
+    const watch = createPositionWatch({});
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+
+    const diag = watch.getDiagnostics();
+    expect(diag.rearmCount).toBe(1);
+    expect(diag.lastRearmReason).toBe('no-fix-timeout');
+    expect(typeof diag.lastRearmAt).toBe('number');
+    watch.stop();
+  });
+
+  it('records a stale-fix re-arm reason when a fix goes stale', async () => {
+    useWatchdogTimers();
+    const watch = createPositionWatch({});
+    emit(watchIds()[0], { latitude: 1, longitude: 2, accuracy: 3 });
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+
+    expect(watch.getDiagnostics().lastRearmReason).toBe('stale-fix');
+    watch.stop();
+  });
+
+  it('records a resume re-arm reason on becoming visible again', async () => {
+    useWatchdogTimers();
+    const watch = createPositionWatch({});
+    setVisibility('hidden');
+    vi.advanceTimersByTime(4000);
+    setVisibility('visible');
+    await flushPromises();
+
+    expect(watch.getDiagnostics().lastRearmReason).toBe('resume');
+    watch.stop();
+  });
+
+  it('records the last error and error count', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    const watch = createPositionWatch({});
+    globalThis.__geolocationTestUtil.emitWatchError(watchIds()[0], 'denied');
+    globalThis.__geolocationTestUtil.emitWatchError(watchIds()[0], 'timeout');
+
+    const diag = watch.getDiagnostics();
+    expect(diag.errorCount).toBe(2);
+    expect(diag.lastError).toBe('timeout');
+    expect(typeof diag.lastErrorAt).toBe('number');
+    watch.stop();
+    errorSpy.mockRestore();
+  });
+
+  it('notifies onDiagnostics with a snapshot on each fix and re-arm', async () => {
+    useWatchdogTimers();
+    const onDiagnostics = vi.fn();
+    const watch = createPositionWatch({ onDiagnostics });
+    expect(onDiagnostics).toHaveBeenCalled();
+
+    emit(watchIds()[0], { latitude: 1, longitude: 2, accuracy: 3 });
+    expect(onDiagnostics).toHaveBeenLastCalledWith(
+      expect.objectContaining({ fixCount: 1 }),
+    );
+
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+    expect(onDiagnostics).toHaveBeenLastCalledWith(
+      expect.objectContaining({ rearmCount: 1, lastRearmReason: 'stale-fix' }),
+    );
+    watch.stop();
+  });
+
+  it('marks the watch inactive after stop', () => {
+    const watch = createPositionWatch({});
+    watch.stop();
+    expect(watch.getDiagnostics().active).toBe(false);
+  });
+});
+
 describe('createPositionWatch watchdog', () => {
   it('re-arms and reports staleness when no fix ever arrives', async () => {
     useWatchdogTimers();
