@@ -8,16 +8,33 @@
  * position (a coordinate change, or the first fix) arrives within
  * `STALE_AFTER_MS`, it clears the watch and starts a new one (throttled by
  * `REARM_COOLDOWN_MS`), and re-arms on `visibilitychange`/`pageshow` when the
- * page was hidden for at least `MIN_HIDDEN_MS` (mirroring the "switch to
- * Google Maps" workaround). Ageing the last *coordinate change* rather than the
- * last *callback* is what catches Firefox for Android, which replays a cached
- * coordinate with an advancing timestamp, so the callback keeps looking fresh
- * even though the position is frozen.
+ * page was hidden for at least `MIN_HIDDEN_MS`.
+ *
+ * Firefox for Android is the case this exists for. GeckoView used to ignore
+ * `enableHighAccuracy` and return Android's cached `getLastKnownLocation()`
+ * regardless of accuracy (Mozilla bug 1765835, fixed in GeckoView 106); the
+ * reporting user's own workaround was to switch to another GPS app and back,
+ * which forces the OS to acquire a fresh fix that the next geolocation call then
+ * returns. This watchdog automates the "and back" half by re-arming, and
+ * reproduces the "another app" half by passing `maximumAge: 0` on a re-arm so
+ * the browser cannot answer from the cache it is stuck on. That workaround is
+ * still needed because two follow-ups remain open: `watchPosition` on Android
+ * fires slower than Chrome (Mozilla bug 1790405) and accuracy is lower than
+ * pre-Fenix Android (bug 1790485). Ageing the last *coordinate change* rather
+ * than the last *callback* is what catches the replay, since the timestamp keeps
+ * advancing even though the position is frozen.
  */
 
 const WATCHDOG_INTERVAL_MS = 5000;
 const STALE_AFTER_MS = 15000;
 const FIRST_FIX_TIMEOUT_MS = 15000;
+// A re-armed watch forbids a cached fix (`maximumAge: 0`), so it must acquire a
+// real one. Android's fix rate is slow and variable (Mozilla bug 1790405:
+// callbacks average 1-5s and can take much longer), and a cold fix can exceed
+// the normal first-fix window; cancelling it and re-arming again would restart
+// the wait every time and never converge, so a re-armed watch gets a longer
+// window before the watchdog gives up on it.
+const FIRST_FIX_TIMEOUT_FRESH_MS = 30000;
 const REARM_COOLDOWN_MS = 10000;
 const MIN_HIDDEN_MS = 1000;
 
@@ -44,6 +61,7 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
   let lastFixAt = null;
   let lastChangeAt = null;
   let watchStartedAt = null;
+  let firstFixWindow = FIRST_FIX_TIMEOUT_MS;
   let lastRearmAt = null;
   let hiddenAt = null;
   let stopped = false;
@@ -97,6 +115,7 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
     // replayed frozen fix is still recognised as a repeat rather than looking
     // like a fresh first fix.
     lastChangeAt = null;
+    firstFixWindow = forceFresh ? FIRST_FIX_TIMEOUT_FRESH_MS : FIRST_FIX_TIMEOUT_MS;
     lastRearmAt = watchStartedAt;
 
     watchId = navigator.geolocation.watchPosition(
@@ -174,7 +193,7 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
     // Age the last *position change*, not the last callback: a frozen replay
     // keeps advancing the callback time without ever moving the coordinate.
     const reference = lastChangeAt ?? watchStartedAt;
-    const limit = lastChangeAt === null ? FIRST_FIX_TIMEOUT_MS : STALE_AFTER_MS;
+    const limit = lastChangeAt === null ? firstFixWindow : STALE_AFTER_MS;
     if (now - reference < limit) return;
 
     if (onStale) onStale(true);

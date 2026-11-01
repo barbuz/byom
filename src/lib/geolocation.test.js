@@ -258,6 +258,40 @@ describe('createPositionWatch watchdog', () => {
     watch.stop();
   });
 
+  it('forbids a cached fix when re-arming', async () => {
+    useWatchdogTimers();
+    const watch = createPositionWatch({});
+    expect(firstWatcher()[1].options.maximumAge).toBe(5000);
+
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+
+    // The re-armed watch must not accept the very cache it is escaping.
+    expect(firstWatcher()[1].options.maximumAge).toBe(0);
+    watch.stop();
+  });
+
+  it('gives a re-armed watch a longer window to acquire a fresh fix', async () => {
+    useWatchdogTimers();
+    const watch = createPositionWatch({});
+
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+    expect(watch.getDiagnostics().rearmCount).toBe(1);
+
+    // The fresh watch forbids cached fixes, so it gets a longer first-fix
+    // window: it must not give up at the normal 15s...
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+    expect(watch.getDiagnostics().rearmCount).toBe(1);
+
+    // ...but does once the extended 30s window elapses.
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+    expect(watch.getDiagnostics().rearmCount).toBe(2);
+    watch.stop();
+  });
+
   it('re-arms when an existing fix goes stale and clears the flag on a fresh fix', async () => {
     useWatchdogTimers();
     const onStale = vi.fn();

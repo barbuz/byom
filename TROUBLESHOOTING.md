@@ -95,8 +95,9 @@ npm run dev -- --port 3000
 
 4. **Position looks frozen (same point, not updating)**:
    - The debug window ("GPS Watchdog" section) shows this: **Identical fixes in a row** climbs while **Last position change** stops advancing, and the re-arm reason reads *coordinates frozen*.
-   - This is a known Firefox for Android `watchPosition` behaviour: it replays a cached fix with a fresh timestamp, so the position never moves even though fixes keep arriving. Switching to another GPS app and back (the "switch to Google Maps" workaround) prompts a fresh fix.
-   - The app detects the replay and re-arms the watch with `maximumAge: 0` to force a fresh acquisition; if it persists, reopen the tab or move somewhere with a clearer sky view.
+   - This is a known Firefox for Android `watchPosition` behaviour. GeckoView used to ignore `enableHighAccuracy` and hand back Android's cached `getLastKnownLocation()` regardless of accuracy, so the position never moved even though fixes kept arriving ([Mozilla bug 1765835](https://bugzilla.mozilla.org/show_bug.cgi?id=1765835); the same report was filed as [fenix#24901](https://github.com/mozilla-mobile/fenix/issues/24901)). It was fixed in GeckoView 106, but two follow-ups remain open — slower callback rate than Chrome ([bug 1790405](https://bugzilla.mozilla.org/show_bug.cgi?id=1790405)) and lower accuracy ([bug 1790485](https://bugzilla.mozilla.org/show_bug.cgi?id=1790485)).
+   - The reporter's own workaround is to **switch to another GPS app (e.g. Google Maps or Ingress) and back**; that makes the OS acquire a fresh fix which the next geolocation call then returns. The app automates this: it detects the replay and re-arms the watch with `maximumAge: 0`, forcing a fresh acquisition and giving it a longer window to complete.
+   - If the position is still wrong, open another GPS app briefly and return, move somewhere with a clearer sky view, or update Firefox (GeckoView 106+ has the upstream fix).
 
 5. **Desktop testing**:
    - Some browsers simulate location
