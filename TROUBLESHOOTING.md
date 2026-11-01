@@ -93,7 +93,12 @@ npm run dev -- --port 3000
    - Ensure GPS signal (outdoors or near window)
    - Wait 10-30 seconds for first fix
 
-4. **Desktop testing**:
+4. **Position looks frozen (same point, not updating)**:
+   - The debug window ("GPS Watchdog" section) shows this: **Identical fixes in a row** climbs while **Last position change** stops advancing, and the re-arm reason reads *coordinates frozen*.
+   - This is a known Firefox for Android `watchPosition` behaviour: it replays a cached fix with a fresh timestamp, so the position never moves even though fixes keep arriving. Switching to another GPS app and back (the "switch to Google Maps" workaround) prompts a fresh fix.
+   - The app detects the replay and re-arms the watch with `maximumAge: 0` to force a fresh acquisition; if it persists, reopen the tab or move somewhere with a clearer sky view.
+
+5. **Desktop testing**:
    - Some browsers simulate location
    - Chrome: DevTools → Sensors → Location
 

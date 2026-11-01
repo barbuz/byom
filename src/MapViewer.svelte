@@ -657,6 +657,7 @@
   const REARM_REASON_LABELS = {
     'no-fix-timeout': 'no fix within timeout',
     'stale-fix': 'fix went stale',
+    'frozen-fix': 'coordinates frozen',
     resume: 'page resumed',
   };
 
@@ -1135,6 +1136,14 @@
                   <span>{formatClock(gpsDiag.lastFixAt)} ({formatAge(debugNow - gpsDiag.lastFixAt)} ago)</span>
                 {:else}
                   <span>none yet ({formatAge(debugNow - gpsDiag.watchStartedAt)} since watch start)</span>
+                {/if}
+              </div>
+              <div class="info-row">
+                <strong>Last position change:</strong>
+                {#if gpsDiag.lastChangeAt}
+                  <span>{formatClock(gpsDiag.lastChangeAt)} ({formatAge(debugNow - gpsDiag.lastChangeAt)} ago)</span>
+                {:else}
+                  <span>none yet</span>
                 {/if}
               </div>
               <div class="info-row">

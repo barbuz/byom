@@ -278,8 +278,10 @@ describe("UserPositionMarker watchdog", () => {
     render(UserPositionMarker, { props: { scheduleRender } });
     const before = watchIds();
 
+    // Genuinely moving fixes; identical coordinates would (correctly) be
+    // treated as a frozen replay.
     for (let i = 0; i < 6; i++) {
-      emitPosition({ latitude: 12.3, longitude: 45.6, accuracy: 8 });
+      emitPosition({ latitude: 12.3 + i * 0.001, longitude: 45.6, accuracy: 8 });
       vi.advanceTimersByTime(5000);
       await flushPromises();
     }
