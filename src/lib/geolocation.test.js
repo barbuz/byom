@@ -224,13 +224,37 @@ describe('createPositionWatch watchdog', () => {
     const watch = createPositionWatch({});
     const before = watchIds();
 
+    // Genuinely moving fixes: each one changes the coordinate, so the position
+    // keeps counting as new even though callbacks and watchdog ticks interleave.
     for (let i = 0; i < 6; i++) {
-      emit(before[0], { latitude: 12.3, longitude: 45.6, accuracy: 8 });
+      emit(before[0], { latitude: 12.3 + i * 0.001, longitude: 45.6, accuracy: 8 });
       vi.advanceTimersByTime(5000);
       await flushPromises();
     }
 
     expect(watchIds()).toEqual(before);
+    watch.stop();
+  });
+
+  it('re-arms when the same coordinate is replayed as if fresh', async () => {
+    useWatchdogTimers();
+    const onStale = vi.fn();
+    const watch = createPositionWatch({ onStale });
+    const before = watchIds();
+
+    // Firefox for Android replays a cached fix with an advancing timestamp.
+    // Ageing the last *change* means the replay still goes stale.
+    emit(before[0], { latitude: 12.3, longitude: 45.6, accuracy: 8 });
+    for (let i = 0; i < 4; i++) {
+      vi.advanceTimersByTime(5000);
+      emit(before[0], { latitude: 12.3, longitude: 45.6, accuracy: 8 });
+      await flushPromises();
+    }
+
+    const after = watchIds();
+    expect(after[0]).not.toBe(before[0]);
+    expect(onStale).toHaveBeenCalledWith(true);
+    expect(watch.getDiagnostics().lastRearmReason).toBe('frozen-fix');
     watch.stop();
   });
 

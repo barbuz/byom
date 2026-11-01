@@ -3,13 +3,16 @@
  * page's "near you" classification.
  *
  * GPS is a best-effort display of an OS-owned signal. Android's fused location
- * provider can return a frozen fix whose reported `accuracy` inflates without
- * bound, and Chromium never re-requests it, so this runs a watchdog: if no fix
- * arrives within `FIRST_FIX_TIMEOUT_MS`, or the last fix is older than
+ * provider can return a frozen fix, and Chromium never re-requests it, so this
+ * runs a watchdog: if no fix arrives within `FIRST_FIX_TIMEOUT_MS`, or no *new*
+ * position (a coordinate change, or the first fix) arrives within
  * `STALE_AFTER_MS`, it clears the watch and starts a new one (throttled by
  * `REARM_COOLDOWN_MS`), and re-arms on `visibilitychange`/`pageshow` when the
  * page was hidden for at least `MIN_HIDDEN_MS` (mirroring the "switch to
- * Google Maps" workaround).
+ * Google Maps" workaround). Ageing the last *coordinate change* rather than the
+ * last *callback* is what catches Firefox for Android, which replays a cached
+ * coordinate with an advancing timestamp, so the callback keeps looking fresh
+ * even though the position is frozen.
  */
 
 const WATCHDOG_INTERVAL_MS = 5000;
@@ -39,6 +42,7 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
   let watchId = null;
   let watchdogId = null;
   let lastFixAt = null;
+  let lastChangeAt = null;
   let watchStartedAt = null;
   let lastRearmAt = null;
   let hiddenAt = null;
@@ -65,6 +69,7 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
       watchStartedAt,
       fixCount,
       lastFixAt,
+      lastChangeAt,
       repeatFixStreak,
       rearmCount,
       lastRearmReason,
@@ -79,7 +84,7 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
     if (onDiagnostics) onDiagnostics(snapshot());
   }
 
-  function startTracking() {
+  function startTracking({ forceFresh = false } = {}) {
     if (!navigator.geolocation) {
       console.warn('Geolocation not supported');
       return;
@@ -87,6 +92,11 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
 
     watchStartedAt = Date.now();
     lastFixAt = null;
+    // Give the new watch a full window to report a *changed* coordinate. The
+    // last seen coordinate (`lastLat`/`lastLon`) is deliberately kept, so a
+    // replayed frozen fix is still recognised as a repeat rather than looking
+    // like a fresh first fix.
+    lastChangeAt = null;
     lastRearmAt = watchStartedAt;
 
     watchId = navigator.geolocation.watchPosition(
@@ -95,17 +105,20 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
         fixCount += 1;
         const lat = position.coords.latitude;
         const lon = position.coords.longitude;
-        // Identical consecutive coordinates usually mean the OS is replaying a
-        // frozen fix rather than reporting a new one, which looks "fresh" to
-        // the watchdog because the timestamp keeps advancing.
-        if (lat === lastLat && lon === lastLon) {
-          repeatFixStreak += 1;
-        } else {
+        // Only a coordinate *change* is new information. Firefox for Android
+        // replays a cached fix with an advancing timestamp, so treating every
+        // callback as fresh would keep a frozen position looking live; a replay
+        // is counted as a repeat and leaves `lastChangeAt` (and the stale flag)
+        // alone.
+        if (lat !== lastLat || lon !== lastLon) {
           repeatFixStreak = 0;
           lastLat = lat;
           lastLon = lon;
+          lastChangeAt = lastFixAt;
+          if (onStale) onStale(false);
+        } else {
+          repeatFixStreak += 1;
         }
-        if (onStale) onStale(false);
         if (onChange) {
           onChange({ latitude: lat, longitude: lon, accuracy: position.coords.accuracy });
         }
@@ -120,7 +133,11 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
       },
       {
         enableHighAccuracy: true,
-        maximumAge: 5000,
+        // A re-arm exists to escape a fix the browser is replaying from its
+        // cache, so it must not be allowed to satisfy the request from that
+        // same cache. `maximumAge: 0` forces a fresh acquisition; the initial
+        // watch tolerates a small cache to stay responsive.
+        maximumAge: forceFresh ? 0 : 5000,
         timeout: 10000,
       },
     );
@@ -154,12 +171,22 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
     const now = Date.now();
     if (lastRearmAt !== null && now - lastRearmAt < REARM_COOLDOWN_MS) return;
 
-    const reference = lastFixAt ?? watchStartedAt;
-    const limit = lastFixAt === null ? FIRST_FIX_TIMEOUT_MS : STALE_AFTER_MS;
+    // Age the last *position change*, not the last callback: a frozen replay
+    // keeps advancing the callback time without ever moving the coordinate.
+    const reference = lastChangeAt ?? watchStartedAt;
+    const limit = lastChangeAt === null ? FIRST_FIX_TIMEOUT_MS : STALE_AFTER_MS;
     if (now - reference < limit) return;
 
     if (onStale) onStale(true);
-    rearmWatch(lastFixAt === null ? 'no-fix-timeout' : 'stale-fix');
+    rearmWatch(rearmReason(now));
+  }
+
+  function rearmReason(now) {
+    if (lastFixAt === null) return 'no-fix-timeout';
+    // Fixes are still arriving but the coordinate has not moved: the browser is
+    // replaying a frozen fix rather than reporting a new one.
+    if (repeatFixStreak > 0 && now - lastFixAt < STALE_AFTER_MS) return 'frozen-fix';
+    return 'stale-fix';
   }
 
   function rearmWatch(reason) {
@@ -167,7 +194,7 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
     lastRearmReason = reason;
     lastRearmAtReason = Date.now();
     stopWatch();
-    startTracking();
+    startTracking({ forceFresh: true });
     notifyDiagnostics();
   }
 

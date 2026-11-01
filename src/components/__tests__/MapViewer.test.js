@@ -878,4 +878,25 @@ describe("MapViewer stale GPS", () => {
     fireEvent.click(screen.getByText(/Debug/));
     await screen.findByText(/Repeated coordinates/);
   });
+
+  it("re-arms with a frozen-fix reason when the coordinate never changes", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+
+    // Firefox for Android keeps replaying the same fix with a fresh timestamp.
+    // Emit to whatever watch is current, since each re-arm creates a new one.
+    for (let i = 0; i < 6; i++) {
+      globalThis.__geolocationTestUtil.emitWatchPosition(firstWatchId(), {
+        latitude: 40.5,
+        longitude: -73.5,
+        accuracy: 20,
+      });
+      vi.advanceTimersByTime(5000);
+      await flushPromises();
+    }
+
+    fireEvent.click(screen.getByText(/Debug/));
+    await screen.findByText(/coordinates frozen/);
+  });
 });
