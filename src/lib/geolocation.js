@@ -10,19 +10,23 @@
  * `REARM_COOLDOWN_MS`), and re-arms on `visibilitychange`/`pageshow` when the
  * page was hidden for at least `MIN_HIDDEN_MS`.
  *
- * Firefox for Android is the case this exists for. GeckoView used to ignore
- * `enableHighAccuracy` and return Android's cached `getLastKnownLocation()`
- * regardless of accuracy (Mozilla bug 1765835, fixed in GeckoView 106); the
- * reporting user's own workaround was to switch to another GPS app and back,
- * which forces the OS to acquire a fresh fix that the next geolocation call then
- * returns. This watchdog automates the "and back" half by re-arming, and
- * reproduces the "another app" half by passing `maximumAge: 0` on a re-arm so
- * the browser cannot answer from the cache it is stuck on. That workaround is
- * still needed because two follow-ups remain open: `watchPosition` on Android
- * fires slower than Chrome (Mozilla bug 1790405) and accuracy is lower than
- * pre-Fenix Android (bug 1790485). Ageing the last *coordinate change* rather
- * than the last *callback* is what catches the replay, since the timestamp keeps
- * advancing even though the position is frozen.
+ * Firefox for Android is the case this exists for. GeckoView has repeatedly
+ * returned Android's cached `getLastKnownLocation()` ahead of a fresh fix:
+ * bug 1765835 (fixed in GV 106) made `enableHighAccuracy` stop doing that, but
+ * bug 1803600 (GV 112/113) reverted it because requiring a new fix caused
+ * timeouts on some devices, so current GeckoView again emits a cached location
+ * first. That cached fix is often network-based and very coarse (the reports
+ * cite 800-1000 m), and it is indistinguishable by time: GeckoView does not
+ * pass the fix time, so the JS `position.timestamp` is the *delivery* time
+ * (`PR_Now()`), which is always fresh. The app therefore (a) ages the last
+ * *coordinate change* rather than the last callback, catching a frozen replay,
+ * and (b) treats a very coarse fix (`accuracy` above `COARSE_ACCURACY_M`) as
+ * stale even when its coordinate moves, catching a cached coarse fix. The
+ * reporting user's workaround, to switch to another GPS app and back, is
+ * reproduced by re-arming with `maximumAge: 0` so the browser cannot answer
+ * from the cache it is stuck on. The remaining open follow-ups are bug 1790405
+ * (`watchPosition` fires slower on Android than Chrome) and bug 1790485
+ * (accuracy still below pre-Fenix Android).
  */
 
 const WATCHDOG_INTERVAL_MS = 5000;
@@ -37,6 +41,11 @@ const FIRST_FIX_TIMEOUT_MS = 15000;
 const FIRST_FIX_TIMEOUT_FRESH_MS = 30000;
 const REARM_COOLDOWN_MS = 10000;
 const MIN_HIDDEN_MS = 1000;
+// A fix this coarse is not a resolved position: it is the network/cell
+// fallback GeckoView emits from `getLastKnownLocation()` before Android has a
+// GPS fix. Normal outdoor GPS is <50 m and even WiFi-assisted fixes stay well
+// under this, so it cleanly separates "usable position" from "cached guess".
+const COARSE_ACCURACY_M = 1000;
 
 /**
  * Start watching the user's position.
@@ -72,6 +81,7 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
   let fixCount = 0;
   let lastLat = null;
   let lastLon = null;
+  let lastAccuracy = null;
   let repeatFixStreak = 0;
   let rearmCount = 0;
   let lastRearmReason = null;
@@ -88,6 +98,7 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
       fixCount,
       lastFixAt,
       lastChangeAt,
+      lastAccuracy,
       repeatFixStreak,
       rearmCount,
       lastRearmReason,
@@ -124,6 +135,12 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
         fixCount += 1;
         const lat = position.coords.latitude;
         const lon = position.coords.longitude;
+        const accuracy = position.coords.accuracy;
+        lastAccuracy = accuracy;
+        // A very coarse fix is the cached network location GeckoView emits
+        // before Android has a GPS fix (see the module note). It is reported
+        // with a fresh timestamp, so only its accuracy gives it away.
+        const coarse = accuracy > COARSE_ACCURACY_M;
         // Only a coordinate *change* is new information. Firefox for Android
         // replays a cached fix with an advancing timestamp, so treating every
         // callback as fresh would keep a frozen position looking live; a replay
@@ -134,12 +151,14 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
           lastLat = lat;
           lastLon = lon;
           lastChangeAt = lastFixAt;
-          if (onStale) onStale(false);
         } else {
           repeatFixStreak += 1;
         }
+        // A usable fix is both new *and* precise; a coarse one stays stale so
+        // the marker keeps its "refreshing" treatment and the watchdog re-arms.
+        if (onStale) onStale(repeatFixStreak > 0 || coarse);
         if (onChange) {
-          onChange({ latitude: lat, longitude: lon, accuracy: position.coords.accuracy });
+          onChange({ latitude: lat, longitude: lon, accuracy });
         }
         notifyDiagnostics();
       },
@@ -190,11 +209,18 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
     const now = Date.now();
     if (lastRearmAt !== null && now - lastRearmAt < REARM_COOLDOWN_MS) return;
 
+    // A coarse fix is stale no matter how fresh its timestamp is: the browser
+    // handed back a cached network location rather than waiting for GPS. This
+    // must bypass the age gate, because such a fix keeps its coordinate moving
+    // and so keeps `lastChangeAt` fresh.
+    const coarse = lastAccuracy !== null && lastAccuracy > COARSE_ACCURACY_M;
+
     // Age the last *position change*, not the last callback: a frozen replay
     // keeps advancing the callback time without ever moving the coordinate.
     const reference = lastChangeAt ?? watchStartedAt;
     const limit = lastChangeAt === null ? firstFixWindow : STALE_AFTER_MS;
-    if (now - reference < limit) return;
+    const aged = now - reference >= limit;
+    if (!coarse && !aged) return;
 
     if (onStale) onStale(true);
     rearmWatch(rearmReason(now));
@@ -202,6 +228,9 @@ export function createPositionWatch({ onChange, onStale, onResume, onDiagnostics
 
   function rearmReason(now) {
     if (lastFixAt === null) return 'no-fix-timeout';
+    // A very coarse fix means the browser handed back a cached network location
+    // rather than waiting for a GPS fix.
+    if (lastAccuracy !== null && lastAccuracy > COARSE_ACCURACY_M) return 'coarse-fix';
     // Fixes are still arriving but the coordinate has not moved: the browser is
     // replaying a frozen fix rather than reporting a new one.
     if (repeatFixStreak > 0 && now - lastFixAt < STALE_AFTER_MS) return 'frozen-fix';

@@ -658,6 +658,7 @@
     'no-fix-timeout': 'no fix within timeout',
     'stale-fix': 'fix went stale',
     'frozen-fix': 'coordinates frozen',
+    'coarse-fix': 'cached coarse fix',
     resume: 'page resumed',
   };
 

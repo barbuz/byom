@@ -194,6 +194,13 @@ describe('createPositionWatch diagnostics', () => {
     watch.stop();
   });
 
+  it('reports the last accuracy in diagnostics', () => {
+    const watch = createPositionWatch({});
+    emit(watchIds()[0], { latitude: 1, longitude: 2, accuracy: 42 });
+    expect(watch.getDiagnostics().lastAccuracy).toBe(42);
+    watch.stop();
+  });
+
   it('marks the watch inactive after stop', () => {
     const watch = createPositionWatch({});
     watch.stop();
@@ -233,6 +240,38 @@ describe('createPositionWatch watchdog', () => {
     }
 
     expect(watchIds()).toEqual(before);
+    watch.stop();
+  });
+
+  it('treats a moving but very coarse fix as stale and re-arms', async () => {
+    useWatchdogTimers();
+    const onStale = vi.fn();
+    const watch = createPositionWatch({ onStale });
+    const before = watchIds();
+
+    // A cached network fix: the coordinate moves each time but the accuracy is
+    // far too poor to be a resolved position, and the timestamp is fresh.
+    emit(before[0], { latitude: 12.3, longitude: 45.6, accuracy: 1500 });
+    expect(onStale).toHaveBeenLastCalledWith(true);
+    await flushPromises();
+
+    vi.advanceTimersByTime(15000);
+    await flushPromises();
+
+    expect(watchIds()[0]).not.toBe(before[0]);
+    expect(watch.getDiagnostics().lastRearmReason).toBe('coarse-fix');
+    watch.stop();
+  });
+
+  it('clears the stale flag once a precise fix arrives', async () => {
+    const onStale = vi.fn();
+    const watch = createPositionWatch({ onStale });
+
+    emit(watchIds()[0], { latitude: 12.3, longitude: 45.6, accuracy: 1500 });
+    expect(onStale).toHaveBeenLastCalledWith(true);
+
+    emit(watchIds()[0], { latitude: 12.3001, longitude: 45.6, accuracy: 8 });
+    expect(onStale).toHaveBeenLastCalledWith(false);
     watch.stop();
   });
 

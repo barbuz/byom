@@ -173,7 +173,7 @@ describe("UserPositionMarker", () => {
       },
     );
     const component = result.component;
-    emitPosition({ latitude:  20, longitude:  10, accuracy: 1100 });
+    emitPosition({ latitude:  20, longitude:  10, accuracy: 900 });
     await flushPromises();
     component.drawUserPosition(ctx);
     const calls = ctx.ctxCalls;
@@ -194,8 +194,8 @@ describe("UserPositionMarker", () => {
     const accuracyRadius = arcs[0][1][2];
     const markerOuter = arcs[1][1][2];
     assert.ok(accuracyRadius > 0.05);
-    // The accuracy ring is a real ground distance (11 px for 1100 m on this
-    // 100 m/px map), so with the smaller dot it is now the larger of the two.
+    // The accuracy ring is a real ground distance (900 m, well above the
+    // screen-space dot), so it is the larger of the two.
     assert.ok(accuracyRadius > markerOuter);
     // The dot is a screen-space overlay, so at any zoom its radii stay 6 and 2
     // CSS pixels even though this map is drawn at scale 2.

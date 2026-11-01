@@ -899,4 +899,24 @@ describe("MapViewer stale GPS", () => {
     fireEvent.click(screen.getByText(/Debug/));
     await screen.findByText(/coordinates frozen/);
   });
+
+  it("re-arms with a coarse-fix reason when the browser returns a cached network fix", async () => {
+    vi.useFakeTimers({ toFake: ["setInterval", "clearInterval", "Date"] });
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+
+    // A moving but very coarse fix (GeckoView's cached getLastKnownLocation).
+    for (let i = 0; i < 6; i++) {
+      globalThis.__geolocationTestUtil.emitWatchPosition(firstWatchId(), {
+        latitude: 40.5 + i * 0.01,
+        longitude: -73.5,
+        accuracy: 1500,
+      });
+      vi.advanceTimersByTime(5000);
+      await flushPromises();
+    }
+
+    fireEvent.click(screen.getByText(/Debug/));
+    await screen.findByText(/cached coarse fix/);
+  });
 });
