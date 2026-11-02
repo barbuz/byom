@@ -50,7 +50,7 @@ Once reference points are set, your GPS position appears on the map image automa
 - **Circle** indicates GPS accuracy
 - Updates in real-time as you move
 
-GPS is best-effort: a frozen fix (the same coordinate replayed with a fresh timestamp, which Firefox for Android does) is detected by watching the last *position change* rather than the last callback, and a very coarse fix (a cached network location, also from Firefox for Android) by its poor accuracy, so the marker is shown as stale and the watch re-arms to force a fresh reading instead of drawing a frozen or wildly-off point as if it were live.
+GPS is best-effort and comes straight from the browser, so a known browser bug can prevent it from working at all. See [Known GPS issues](#known-gps-issues) below.
 
 On the landing page, maps are grouped into three sections: **Maps here** (maps whose footprint contains your current location), **Incomplete** (fewer than two points, so not yet georeferenced), and **Other maps**. Each section is labelled **Sort by** and offers distance, map size, last modified and name, with an ascending/descending toggle. Options that cannot work for a section's maps are disabled: size and distance need a georeferenced footprint, so they are greyed out in **Incomplete**. The distance on a card is always measured to the map's centre ("… from map centre") — the same distance the "Distance" sort uses, so a card's badge and its position always agree — and it is shown on every georeferenced card rather than as a containment claim. The page updates as you move.
 
@@ -82,7 +82,7 @@ byom/
 │       ├── db.js                     # IndexedDB wrapper
 │       ├── transforms.js             # Transform algorithms
 │       ├── mapMatch.js               # Landing-page containment/classification
-│       └── geolocation.js            # Shared GPS watch + stale-fix watchdog
+│       └── geolocation.js            # Shared GPS watch
 ├── public/
 │   ├── manifest.json                 # PWA manifest
 │   ├── sw.js                         # Service worker (version placeholders)
@@ -110,6 +110,23 @@ byom/
 - **Desktop**: Chrome, Edge, Firefox, Safari (latest versions)
 - **Mobile**: iOS Safari 13+, Chrome Android 80+
 - **Required**: IndexedDB, Geolocation API, Canvas, Touch Events
+
+## 🐛 Known GPS issues
+
+GPS comes directly from the browser's Geolocation API, and some browsers have bugs that can stop your position from appearing on the map, or make it wrong. These are browser bugs, not app bugs — the app cannot work around them, and there is no in-app fix. The current known cases are all in **Firefox for Android**:
+
+- **Frozen position** — the same coordinate is reported over and over while the real position has moved. GeckoView replays Android's cached `getLastKnownLocation()` instead of waiting for a fresh fix, and reports it with a fresh timestamp, so nothing downstream can tell it is stale. See [bug 1765835](https://bugzilla.mozilla.org/show_bug.cgi?id=1765835) (fixed in GeckoView 106, then partially [reverted by bug 1803600](https://bugzilla.mozilla.org/show_bug.cgi?id=1803600) because requiring a fresh fix caused timeouts on some devices).
+- **Coarse or wrong position** — the reported accuracy is very poor (hundreds of metres) and the position can be far off, usually because the cached fix above is a network/cell estimate rather than a GPS fix. See [bug 1790485](https://bugzilla.mozilla.org/show_bug.cgi?id=1790485).
+- **Slow updates** — position callbacks arrive much less often than in Chrome. See [bug 1790405](https://bugzilla.mozilla.org/show_bug.cgi?id=1790405).
+
+**Workarounds** (all on the device, none in the app):
+
+- **Switch to another GPS app (e.g. Google Maps or Ingress) and back** — this makes Android acquire a fresh fix, which the next geolocation call then returns. This is the workaround most often reported to work.
+- **Use a different browser** — Chrome for Android does not have these bugs.
+- **Move somewhere with a clearer view of the sky** and wait for a real GPS fix.
+- **Check the location permission** — grant precise (not approximate) location to the browser.
+
+If your position is still wrong after these, it is the browser, not the app. Reporting it upstream (or switching browsers) is the only fix.
 
 ## 📝 Documentation
 

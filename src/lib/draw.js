@@ -5,7 +5,6 @@ import { geoToUV, geoDistanceToUV, imageDivisor } from './transforms.js';
 // and does scale with the map.
 const USER_MARKER_RADIUS = 6;
 const USER_MARKER_INNER_RADIUS = 2;
-const STALE_MARKER_RADIUS = 6;
 
 // Scale the current transform about a fixed point, so a marker drawn afterwards
 // stays centered while its radius changes in screen space. Expressed as one
@@ -104,7 +103,7 @@ export function drawPendingPoint(ctx, pendingPoint, transform, imageWidth, image
   ctx.stroke();
 }
 
-export function drawUserMarker(ctx, position, geoTransform, transform, imageWidth, imageHeight, stale = false) {
+export function drawUserMarker(ctx, position, geoTransform, transform, imageWidth, imageHeight) {
   if (!position || !geoTransform) return;
 
   try {
@@ -119,24 +118,6 @@ export function drawUserMarker(ctx, position, geoTransform, transform, imageWidt
     // The accuracy ring is drawn before that cancellation because it represents
     // real ground coverage and must shrink and grow with the map.
     applyImageTransform(ctx, transform, imageWidth, imageHeight);
-
-    // A stale fix is a frozen coordinate whose reported accuracy has ceased to
-    // mean anything; drawing its ballooning ring would imply a precision we do
-    // not have. Show a hollow, dashed marker instead.
-    if (stale) {
-      scaleAbout(ctx, x, y, 1 / transform.scale);
-      ctx.strokeStyle = 'rgba(175, 76, 80, 0.8)';
-      ctx.fillStyle = 'rgba(175, 76, 80, 0.15)';
-      ctx.lineWidth = 3;
-      ctx.setLineDash([6, 6]);
-      ctx.beginPath();
-      ctx.arc(x, y, STALE_MARKER_RADIUS, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.stroke();
-      ctx.setLineDash([]);
-      ctx.restore();
-      return;
-    }
 
     if (position.accuracy) {
       const accuracyInPixels = geoDistanceToUV(position.longitude, position.latitude, position.accuracy, geoTransform) * divisor;

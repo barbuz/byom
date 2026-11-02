@@ -93,12 +93,17 @@ npm run dev -- --port 3000
    - Ensure GPS signal (outdoors or near window)
    - Wait 10-30 seconds for first fix
 
-4. **Position looks frozen (same point, not updating)**:
-   - The debug window ("GPS Watchdog" section) shows this: **Identical fixes in a row** climbs while **Last position change** stops advancing, and the re-arm reason reads *coordinates frozen*.
-   - A second, related symptom: the position *does* move but is wildly off (hundreds of metres) and its accuracy is very poor. This is GeckoView handing back Android's cached network location before a real GPS fix; the re-arm reason then reads *cached coarse fix*.
-   - Both are known Firefox for Android `watchPosition` behaviour. GeckoView has repeatedly returned Android's cached `getLastKnownLocation()` regardless of `enableHighAccuracy`: [bug 1765835](https://bugzilla.mozilla.org/show_bug.cgi?id=1765835) (the same report was filed as [fenix#24901](https://github.com/mozilla-mobile/fenix/issues/24901)) fixed it in GeckoView 106, but [bug 1803600](https://bugzilla.mozilla.org/show_bug.cgi?id=1803600) reverted that in GeckoView 112/113 because forcing a fresh fix caused timeouts on some devices — so it is present again on current Firefox. Two follow-ups also remain open: slower callback rate than Chrome ([bug 1790405](https://bugzilla.mozilla.org/show_bug.cgi?id=1790405)) and lower accuracy ([bug 1790485](https://bugzilla.mozilla.org/show_bug.cgi?id=1790485)).
-   - The reporter's own workaround is to **switch to another GPS app (e.g. Google Maps or Ingress) and back**; that makes the OS acquire a fresh fix which the next geolocation call then returns. The app automates this: it detects the frozen or coarse fix and re-arms the watch with `maximumAge: 0`, forcing a fresh acquisition and giving it a longer window to complete.
-   - If the position is still wrong, open another GPS app briefly and return, move somewhere with a clearer sky view, or update Firefox (though current Firefox still carries the reverted behaviour, so the app-side workaround is what matters here).
+4. **Position looks frozen, is wrong, or does not update**:
+   - These are **browser bugs, not app bugs**, and the app cannot work around them. All the known cases are in **Firefox for Android**:
+     - **Frozen position** — the same coordinate keeps being reported after you have moved. GeckoView replays Android's cached `getLastKnownLocation()` with a fresh timestamp, so it looks live. See [bug 1765835](https://bugzilla.mozilla.org/show_bug.cgi?id=1765835) (fixed in GeckoView 106, then partially [reverted by bug 1803600](https://bugzilla.mozilla.org/show_bug.cgi?id=1803600) in GeckoView 112/113 because requiring a fresh fix caused timeouts on some devices).
+     - **Coarse or wrong position** — accuracy is very poor (hundreds of metres) and the position can be far off, usually a network/cell estimate rather than a GPS fix. See [bug 1790485](https://bugzilla.mozilla.org/show_bug.cgi?id=1790485).
+     - **Slow updates** — callbacks arrive far less often than in Chrome. See [bug 1790405](https://bugzilla.mozilla.org/show_bug.cgi?id=1790405).
+   - **Workarounds** (all on the device):
+     - **Switch to another GPS app (e.g. Google Maps or Ingress) and back.** This makes Android acquire a fresh fix, which the next geolocation call then returns. This is the workaround most often reported to work.
+     - **Use Chrome for Android instead** — it does not have these bugs.
+     - Move somewhere with a clearer view of the sky and wait for a real GPS fix.
+     - Make sure the browser has **precise** (not approximate) location permission.
+   - There is no in-app fix, because the bad position is indistinguishable from a good one. The app used to run a "watchdog" that restarted the watch when fixes stalled; it was removed because it could not correct the underlying browser behaviour. See the "Known GPS issues" section of [README.md](README.md) for the same information in one place.
 
 5. **Desktop testing**:
    - Some browsers simulate location

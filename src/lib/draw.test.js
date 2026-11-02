@@ -174,26 +174,6 @@ describe('drawUserMarker', () => {
     expect(radiiAt(4)).toEqual([6, 2]);
   });
 
-  it('keeps the stale marker a constant screen size at any zoom', () => {
-    const geoTransform = { m: [10000, 0, 0, 0, 10000, 0, 0, 0, 1], type: 'similarity', lon0: 0, lat0: 0 };
-    const radiusAt = (scale) => {
-      const ctx = fakeCtx();
-      drawUserMarker(
-        ctx,
-        { longitude: 0, latitude: 0, accuracy: 50 },
-        geoTransform,
-        { scale, rotation: 0, translateX: 0, translateY: 0 },
-        100,
-        80,
-        true
-      );
-      return ctx.calls.filter(c => c[0] === 'arc')[0][1][2];
-    };
-
-    expect(radiusAt(1)).toBe(6);
-    expect(radiusAt(4)).toBe(6);
-  });
-
   it('draws the marker at the correct screen point under rotation and zoom', () => {
     // Compose the recorded canvas transform stack and confirm the marker's
     // image point lands on the same screen point imageToScreen would give, and
