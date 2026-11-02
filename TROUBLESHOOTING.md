@@ -93,10 +93,17 @@ npm run dev -- --port 3000
    - Ensure GPS signal (outdoors or near window)
    - Wait 10-30 seconds for first fix
 
-4. **Position looks frozen (same point, not updating)**:
-   - The debug window ("GPS Watchdog" section) shows this: **Identical fixes in a row** climbs while **Last position change** stops advancing, and the re-arm reason reads *coordinates frozen*.
-   - This is a known Firefox for Android `watchPosition` behaviour: it replays a cached fix with a fresh timestamp, so the position never moves even though fixes keep arriving. Switching to another GPS app and back (the "switch to Google Maps" workaround) prompts a fresh fix.
-   - The app detects the replay and re-arms the watch with `maximumAge: 0` to force a fresh acquisition; if it persists, reopen the tab or move somewhere with a clearer sky view.
+4. **Position looks frozen, is wrong, or does not update**:
+   - These are **browser bugs, not app bugs**, and the app cannot work around them. All the known cases are in **Firefox for Android**:
+     - **Frozen position** — the same coordinate keeps being reported after you have moved. GeckoView replays Android's cached `getLastKnownLocation()` with a fresh timestamp, so it looks live. See [bug 1765835](https://bugzilla.mozilla.org/show_bug.cgi?id=1765835) (fixed in GeckoView 106, then partially [reverted by bug 1803600](https://bugzilla.mozilla.org/show_bug.cgi?id=1803600) in GeckoView 112/113 because requiring a fresh fix caused timeouts on some devices).
+     - **Coarse or wrong position** — accuracy is very poor (hundreds of metres) and the position can be far off, usually a network/cell estimate rather than a GPS fix. See [bug 1790485](https://bugzilla.mozilla.org/show_bug.cgi?id=1790485).
+     - **Slow updates** — callbacks arrive far less often than in Chrome. See [bug 1790405](https://bugzilla.mozilla.org/show_bug.cgi?id=1790405).
+   - **Workarounds** (all on the device):
+     - **Switch to another GPS app (e.g. Google Maps or Ingress) and back.** This makes Android acquire a fresh fix, which the next geolocation call then returns. This is the workaround most often reported to work.
+     - **Use Chrome for Android instead** — it does not have these bugs.
+     - Move somewhere with a clearer view of the sky and wait for a real GPS fix.
+     - Make sure the browser has **precise** (not approximate) location permission.
+   - There is no in-app fix, because the bad position is indistinguishable from a good one. The app used to run a "watchdog" that restarted the watch when fixes stalled; it was removed because it could not correct the underlying browser behaviour. See the "Known GPS issues" section of [README.md](README.md) for the same information in one place.
 
 5. **Desktop testing**:
    - Some browsers simulate location

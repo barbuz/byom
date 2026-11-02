@@ -14,11 +14,9 @@
 
   // GPS state
   let userPosition = $state(null);
-  let positionStale = $state(false);
-  let gpsDiagnostics = $state(null);
 
   // Expose state to parent
-  export { userPosition, positionStale, gpsDiagnostics };
+  export { userPosition };
 
   onMount(() => {
     const watch = createPositionWatch({
@@ -26,21 +24,12 @@
         userPosition = position;
         scheduleRender();
       },
-      onStale: (stale) => {
-        positionStale = stale;
-      },
-      onResume: () => {
-        scheduleRender();
-      },
-      onDiagnostics: (diagnostics) => {
-        gpsDiagnostics = diagnostics;
-      },
     });
 
     return () => watch.stop();
   });
 
   export function drawUserPosition(ctx) {
-    drawUserMarker(ctx, userPosition, geoTransform, transform, imageWidth, imageHeight, positionStale);
+    drawUserMarker(ctx, userPosition, geoTransform, transform, imageWidth, imageHeight);
   }
 </script>

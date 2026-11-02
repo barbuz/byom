@@ -34,7 +34,6 @@
   let fileInput = $state(null);
 
   let userPosition = $state(null);
-  let positionStale = $state(false);
   // The fix the current classification was built from; plain state, not $state,
   // because it only gates recomputation and never needs to render.
   let lastClassifiedPosition = null;
@@ -62,9 +61,6 @@
           lastClassifiedPosition = position;
           userPosition = position;
         }
-      },
-      onStale: (stale) => {
-        positionStale = stale;
       },
     });
 
@@ -355,9 +351,7 @@
         {/if}
       </div>
       {#if !userPosition}
-        <p class="section-message">
-          {positionStale ? 'Location unavailable.' : 'Waiting for your location...'}
-        </p>
+        <p class="section-message">Waiting for your location...</p>
       {:else if nearMaps.length === 0}
         <p class="section-message">No maps contain your current location.</p>
       {:else}
