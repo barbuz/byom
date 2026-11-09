@@ -44,7 +44,7 @@ public/
 .github/workflows/              # test.yml, deploy.yml (GitHub Pages), tag-release.yml
 ```
 
-`src/lib/` holds pure ES modules: `db.js` (IndexedDB wrapper), `transforms.js` (similarity/affine/homography georeferencing), `viewport.js` (screen/image coordinate math, pinch-zoom), `draw.js` (canvas rendering, takes a `ctx`), `mapMatch.js` (landing-page containment/classification/sorting), `geolocation.js` (shared GPS watch), `pdf.js` (rasterise a PDF page to a PNG blob for import).
+`src/lib/` holds pure ES modules: `db.js` (IndexedDB wrapper), `transforms.js` (similarity/affine/homography georeferencing), `viewport.js` (screen/image coordinate math, pinch-zoom), `draw.js` (canvas rendering, takes a `ctx`), `mapMatch.js` (landing-page containment/classification/sorting), `grid.js` (lat/lon graticule: nice step selection, line generation, zoom level filtering), `geolocation.js` (shared GPS watch), `pdf.js` (rasterise a PDF page to a PNG blob for import).
 
 ## Testing
 

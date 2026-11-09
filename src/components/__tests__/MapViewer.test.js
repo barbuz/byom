@@ -806,3 +806,67 @@ describe("MapViewer point editing", () => {
     assert.equal(window.alert.mock.calls.length, 1);
   });
 });
+
+describe("MapViewer graticule", () => {
+  function bezierCount() {
+    return globalThis.__canvasTestUtil
+      .getCtxCalls()
+      .filter(([method]) => method === "bezierCurveTo").length;
+  }
+
+  function gridButton() {
+    return screen.getByRole("button", { name: /Grid/ });
+  }
+
+  it("does not draw the grid by default", async () => {
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    assert.equal(bezierCount(), 0);
+    assert.equal(gridButton().classList.contains("active"), false);
+  });
+
+  it("draws the graticule after toggling the Grid button", async () => {
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(gridButton());
+    await sleep(30);
+
+    assert.equal(gridButton().classList.contains("active"), true);
+    assert.ok(bezierCount() > 0, "grid should stroke Bezier segments");
+    // The grid is clipped to the image rectangle.
+    const calls = globalThis.__canvasTestUtil.getCtxCalls();
+    assert.ok(calls.some(([method]) => method === "clip"));
+  });
+
+  it("hides the graticule again when toggled off", async () => {
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(gridButton());
+    await sleep(30);
+    assert.ok(bezierCount() > 0);
+
+    globalThis.__canvasTestUtil.reset();
+    fireEvent.click(gridButton());
+    await sleep(30);
+
+    assert.equal(gridButton().classList.contains("active"), false);
+    assert.equal(bezierCount(), 0);
+  });
+
+  it("shows no grid when the map has no georeference", async () => {
+    getReferencePoints.mockResolvedValue([]);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(gridButton());
+    await sleep(30);
+
+    assert.equal(bezierCount(), 0);
+  });
+});

@@ -2,6 +2,8 @@
   import { getMap, getReferencePoints } from './lib/db.js';
   import { createGeoreference, geoToUV, geoDistanceToUV, imageDivisor } from './lib/transforms.js';
   import { screenToImage, getPointAtScreen, pinchZoomTransform, centerOnImagePoint } from './lib/viewport.js';
+  import { buildGraticule } from './lib/grid.js';
+  import { drawGraticule } from './lib/draw.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
 
@@ -56,6 +58,7 @@
   let editingPoint = $state(null);
   let hoverPointIndex = $state(-1);
   let showingDebug = $state(false);
+  let showingGrid = $state(false);
   let pendingReferencePoint = $state(null);
   let showingCoordinateSelection = $state(false);
   let coordinateMethod = $state(null);
@@ -203,6 +206,12 @@
 
     // Draw image
     ctx.drawImage(imageElement, 0, 0, imageWidth, imageHeight);
+
+    // Draw the graticule over the image but under the reference points, so the
+    // points stay readable on top of it.
+    if (showingGrid && grid) {
+      drawGraticule(ctx, grid, transform, imageWidth, imageHeight, { labels: true });
+    }
 
     // Draw reference points
     ctx.restore();
@@ -642,6 +651,11 @@
     showingDebug = !showingDebug;
   }
 
+  function toggleGrid() {
+    showingGrid = !showingGrid;
+    scheduleRender();
+  }
+
   function showCoordinateSelection() {
     showingCoordinateSelection = true;
     coordinateMethod = null;
@@ -877,6 +891,12 @@
   // a silently distorted map. The matrix models (2–4 points) and the MLS warp
   // (5+) share this one test, and the same wording.
   let geoTransformFolded = $derived(Boolean(geoTransform?.isFolded()));
+
+  // The fine graticule is derived from the georeference and the image
+  // dimensions, so it is rebuilt only when those change (loading a map, editing
+  // a reference point) - never on a GPS fix or a pan/zoom. The render path only
+  // selects a display level from `transform.scale`.
+  let grid = $derived(buildGraticule(geoTransform, imageWidth, imageHeight));
 </script>
 
 <div class="viewer-container">
@@ -919,6 +939,13 @@
       onclick={toggleDebug}
     >
       🐛 Debug
+    </button>
+
+    <button
+      class="control-btn grid-btn {showingGrid ? 'active' : ''}"
+      onclick={toggleGrid}
+    >
+      🌐 Grid
     </button>
   </div>
 

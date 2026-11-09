@@ -12,6 +12,7 @@ A Progressive Web App for georeferencing map photos and viewing your GPS locatio
 - 🗺️ **Uses OpenStreetMap** for coordinate selection
 - ⚡ **No server required** - completely serverless PWA
 - 🎯 **High accuracy** - similarity, affine, homography or moving-least-squares transform by point count
+- 🌐 **Optional coordinate grid** - overlay a real lat/lon graticule that refines as you zoom in
 
 ## 🚀 Quick Start
 
@@ -51,6 +52,8 @@ Once reference points are set, your GPS position appears on the map image automa
 - Updates in real-time as you move
 
 GPS is best-effort and comes straight from the browser, so a known browser bug can prevent it from working at all. See [Known GPS issues](#known-gps-issues) below.
+
+The **Grid** button overlays a real latitude/longitude graticule on the map. Lines land on round coordinate values (e.g. 45.63 / 45.64), with the fewest decimals the map's extent allows, and the visible density adapts to zoom: zooming in reveals progressively finer lines and zooming out hides them, while the line values themselves never change. The grid is clipped to the image and drawn under the reference points, and it is regenerated only when the reference points or image change - never while panning, zooming or tracking GPS. On a 5+ point map the lines are smooth curves that follow the moving-least-squares warp.
 
 On the landing page, maps are grouped into three sections: **Maps here** (maps whose footprint contains your current location), **Incomplete** (fewer than two points, so not yet georeferenced), and **Other maps**. Each section is labelled **Sort by** and offers distance, map size, last modified and name, with an ascending/descending toggle. Options that cannot work for a section's maps are disabled: size and distance need a georeferenced footprint, so they are greyed out in **Incomplete**. The distance on a card is always measured to the map's centre ("… from map centre") — the same distance the "Distance" sort uses, so a card's badge and its position always agree — and it is shown on every georeferenced card rather than as a containment claim. The page updates as you move.
 
