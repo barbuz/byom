@@ -36,6 +36,19 @@ const DEG_TO_RAD = Math.PI / 180;
 const LADDER = [1, 2, 5];
 
 /**
+ * The nice decimal `mantissa x 10^exponent` as a double. Built from its decimal
+ * form rather than `mantissa * Math.pow(10, exponent)`: the two differ in the
+ * last bit on some engines (`Math.pow(10, -4)` is 0.00009999999999999999), and a
+ * grid line's value should be exactly the round number it is labelled with.
+ * @param {number} mantissa
+ * @param {number} exponent
+ * @returns {number}
+ */
+function niceValue(mantissa, exponent) {
+  return Number(`${mantissa}e${exponent}`);
+}
+
+/**
  * Smallest `{1, 2, 5} x 10^k` value that is >= `value`.
  * @param {number} value
  * @returns {number|null} The nice step, or null for non-finite/non-positive input.
@@ -44,10 +57,10 @@ export function niceStepAtLeast(value) {
   if (!Number.isFinite(value) || value <= 0) return null;
   const exponent = Math.floor(Math.log10(value));
   for (const mantissa of LADDER) {
-    const candidate = mantissa * Math.pow(10, exponent);
+    const candidate = niceValue(mantissa, exponent);
     if (candidate >= value * (1 - 1e-9)) return candidate;
   }
-  return Math.pow(10, exponent + 1);
+  return niceValue(1, exponent + 1);
 }
 
 /**
@@ -59,8 +72,12 @@ export function niceStepNear(value) {
   if (!Number.isFinite(value) || value <= 0) return null;
   const exponent = Math.floor(Math.log10(value));
   let best = null;
-  for (const mantissa of [...LADDER, 10]) {
-    const candidate = mantissa * Math.pow(10, exponent);
+  for (const candidate of [
+    niceValue(1, exponent),
+    niceValue(2, exponent),
+    niceValue(5, exponent),
+    niceValue(1, exponent + 1),
+  ]) {
     if (best === null || Math.abs(candidate - value) < Math.abs(best - value)) {
       best = candidate;
     }
@@ -93,7 +110,7 @@ function levelsFor(baseStep, span) {
   const exponent = Math.floor(Math.log10(baseStep));
   for (let k = exponent - 1; k <= exponent + 6; k++) {
     for (const mantissa of LADDER) {
-      const candidate = mantissa * Math.pow(10, k);
+      const candidate = niceValue(mantissa, k);
       if (candidate < baseStep * (1 - 1e-9)) continue;
       if (candidate > span * (1 + 1e-9)) continue;
       const ratio = candidate / baseStep;
