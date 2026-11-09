@@ -163,6 +163,42 @@ describe('buildGraticule', () => {
     expect(buildGraticule(fakeGeoreference(), 800, 600).lines[0].curves).toHaveLength(DEFAULT_SAMPLES - 1);
   });
 
+  it('tracks a curved warp closely at the default sample count', () => {
+    // A quadratic bend turns ground lines into curves, standing in for the
+    // sharp crease a folded MLS map produces. DEFAULT_SAMPLES must follow it
+    // within a small fraction of a cell; 16 samples did not (0.018), 32 does
+    // (0.009), so this pins the doubled default.
+    const bent = (samples) => buildGraticule(fakeGeoreference({ bend: 2000 }), 800, 600, { samples });
+    const fine = bent(400);
+    const drawn = bent(DEFAULT_SAMPLES);
+    const evalCurve = (line, t) => {
+      const index = Math.min(line.curves.length - 1, Math.floor(t * line.curves.length));
+      const localT = Math.min(1, t * line.curves.length - index);
+      const seg = line.curves[index];
+      const from = index === 0 ? line.start : line.curves[index - 1].to;
+      const mt = 1 - localT;
+      const w0 = mt * mt * mt;
+      const w1 = 3 * mt * mt * localT;
+      const w2 = 3 * mt * localT * localT;
+      const w3 = localT * localT * localT;
+      return {
+        u: w0 * from.u + w1 * seg.c1.u + w2 * seg.c2.u + w3 * seg.to.u,
+        v: w0 * from.v + w1 * seg.c1.v + w2 * seg.c2.v + w3 * seg.to.v,
+      };
+    };
+    let worst = 0;
+    for (let i = 0; i < fine.lines.length; i++) {
+      for (let s = 0; s <= 200; s++) {
+        const t = s / 200;
+        const a = evalCurve(drawn.lines[i], t);
+        const b = evalCurve(fine.lines[i], t);
+        worst = Math.max(worst, Math.hypot(a.u - b.u, a.v - b.v));
+      }
+    }
+    // Image fractions; a grid cell is 1/maxDivisions = 1/64 ~ 0.0156.
+    expect(worst).toBeLessThan(0.012);
+  });
+
   it('formats labels with the fewest decimals for the step', () => {
     const grid = buildGraticule(fakeGeoreference({ metres: 2000 }), 800, 600, { maxDivisions: 200 });
     const latLine = grid.lines.find((line) => line.kind === 'lat');

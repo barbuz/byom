@@ -25,8 +25,10 @@ import { imageCornersToMetricBounds } from './mapMatch.js';
 
 // One metre-based target cell per axis; keeps each axis to ~maxDivisions lines.
 export const DEFAULT_MAX_DIVISIONS = 64;
-// Samples per generated line; enough to render an MLS curve without kinks.
-export const DEFAULT_SAMPLES = 16;
+// Samples per generated line. 32 keeps an MLS curve smooth even where a folded
+// map creases it; on a valid (unfolded) map the error is already at the smooth
+// floor by 16, so this is margin for maps the app has flagged as folded.
+export const DEFAULT_SAMPLES = 32;
 // Minimum on-screen spacing between shown lines, in CSS pixels.
 export const MIN_SPACING_PX = 64;
 // Mean metres per degree of latitude, matching transforms.js.

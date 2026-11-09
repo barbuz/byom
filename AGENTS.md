@@ -46,6 +46,8 @@ public/
 
 `src/lib/` holds pure ES modules: `db.js` (IndexedDB wrapper), `transforms.js` (similarity/affine/homography georeferencing), `viewport.js` (screen/image coordinate math, pinch-zoom), `draw.js` (canvas rendering, takes a `ctx`), `mapMatch.js` (landing-page containment/classification/sorting), `grid.js` (lat/lon graticule: nice step selection, line generation, zoom level filtering), `geolocation.js` (shared GPS watch), `pdf.js` (rasterise a PDF page to a PNG blob for import).
 
+- **Graticule** (`grid.js`, `drawGraticule` in `draw.js`): one fine grid is built per georeference at a `{1,2,5}x10^k` base step from the map's ground extent, and the display level is picked per frame from `transform.scale` (`pickGridStepForScale`), so `visibleLines` is a pure filter — levels are integer multiples of the base step, never a re-projection. Each line is sampled at `DEFAULT_SAMPLES` (32) points along its padded geographic span and rendered as Catmull-Rom cubic Béziers, so a linear model draws straight and an MLS warp draws smooth. 32 rather than 16 because a *folded* map creases the warp sharply and 16 samples cut the corner (measured ~54 px error on an 800 px image vs ~10 px at 32); on a valid unfolded map the error is already at the smooth floor by 16, so the extra samples are margin for the already-flagged folded case. The reference-point markers are drawn from `geoToUV` directly, so a misplaced point still sits exactly where it was placed and the grid bends visibly around it.
+
 ## Testing
 
 Run tests: `npm test` or `npm run test:coverage`. Test glob: `src/**/*.test.js` (`vitest.config.js`).
