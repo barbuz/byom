@@ -556,7 +556,7 @@ function solve2x2(a, b, c, d, e, f) {
  * (the 2D Procrustes/Umeyama fit, here in complex form to avoid an SVD of a
  * 2x2 matrix). With `p̄`/`q̄` the centroids:
  *
- *   num = Σ (p_i − p̄) conj(q_i − q̄)          // complex
+ *   num = Σ (q_i − q̄) conj(p_i − p̄)          // complex
  *   den = Σ |p_i − p̄|²                        // real
  *   s   = num / den
  *   t   = q̄ − s·p̄
@@ -602,7 +602,7 @@ export function computeLeastSquaresSimilarityTransform(points, lon0, lat0) {
   qBarRe /= points.length;
   qBarIm /= points.length;
 
-  // num = Σ (p_i − p̄) conj(q_i − q̄); den = Σ |p_i − p̄|².
+  // num = Σ (q_i − q̄) conj(p_i − p̄); den = Σ |p_i − p̄|².
   let numRe = 0;
   let numIm = 0;
   let den = 0;
@@ -611,9 +611,11 @@ export function computeLeastSquaresSimilarityTransform(points, lon0, lat0) {
     const dpIm = p[i].im - pBarIm;
     const dqRe = q[i].re - qBarRe;
     const dqIm = q[i].im - qBarIm;
-    // (dpRe + i·dpIm)(dqRe − i·dqIm)
-    numRe += dpRe * dqRe + dpIm * dqIm;
-    numIm += dpIm * dqRe - dpRe * dqIm;
+    // (dqRe + i·dqIm)(dpRe − i·dpIm). Conjugating p (not q) is what keeps the
+    // fitted rotation on the same side as the correspondences; the other order
+    // returns conj(s), a reflection that is invisible when the map is upright.
+    numRe += dqRe * dpRe + dqIm * dpIm;
+    numIm += dqIm * dpRe - dqRe * dpIm;
     den += dpRe * dpRe + dpIm * dpIm;
   }
 

@@ -802,23 +802,25 @@ function warpedGrid() {
 // A rotated affine map: the ground-to-image linear part is a rotation, so it
 // is NOT symmetric. The other fixtures are axis-aligned (a diagonal/symmetric
 // linear part), which cannot distinguish M = A B⁻¹ from the transposed
-// M = Aᵀ B⁻¹ — this fixture can.
+// M = Aᵀ B⁻¹ — this fixture can. The same rotation is what pins the sign of a
+// fitted similarity: an upright map has a real `s` (b = 0), so a fit that
+// returns conj(s) — a reflection — is indistinguishable from the correct one.
 const ROTATED_THETA = (30 * Math.PI) / 180;
 const ROTATED_SCALE = 1e-4;
-function rotatedPoint(east, north) {
+function rotatedPoint(east, north, angle = ROTATED_THETA) {
   const { lon, lat } = mlsToLonLat(east, north);
-  const c = Math.cos(ROTATED_THETA);
-  const s = Math.sin(ROTATED_THETA);
+  const c = Math.cos(angle);
+  const s = Math.sin(angle);
   // Canonical frame q = s · R(θ) · p, then stored y-down (v = -q_y).
   const qx = ROTATED_SCALE * (c * east - s * north);
   const qy = ROTATED_SCALE * (s * east + c * north);
   return { u: 0.5 + qx, v: 0.5 - qy, lon, lat, accuracy: null };
 }
-function rotatedGrid() {
+function rotatedGrid(angle = ROTATED_THETA) {
   const points = [];
   for (let i = -2; i <= 2; i++) {
     for (let j = -2; j <= 2; j++) {
-      points.push(rotatedPoint(i * 2000, j * 2000));
+      points.push(rotatedPoint(i * 2000, j * 2000, angle));
     }
   }
   return points;
@@ -855,6 +857,21 @@ describe('computeLeastSquaresSimilarityTransform', () => {
       const uv = geoToUV(point.lon, point.lat, t);
       expect(uv.u).toBeCloseTo(point.u, 9);
       expect(uv.v).toBeCloseTo(point.v, 9);
+    }
+  });
+
+  it('recovers a rotated similarity, not its mirror', () => {
+    // The other exactness fixtures are upright (b = 0), so a fit that returns
+    // conj(s) — a reflection — passes them. A rotated map is the only fixture
+    // that pins the sign of the fitted rotation.
+    for (const angle of [0.4, -0.4, Math.PI / 2]) {
+      const points = rotatedGrid(angle);
+      const t = computeLeastSquaresSimilarityTransform(points, MLS_LON0, MLS_LAT0);
+      for (const point of points) {
+        const uv = geoToUV(point.lon, point.lat, t);
+        expect(uv.u).toBeCloseTo(point.u, 9);
+        expect(uv.v).toBeCloseTo(point.v, 9);
+      }
     }
   });
 
@@ -1025,6 +1042,20 @@ describe('computeFoldState', () => {
     expect(state.minDet).toBeGreaterThan(0);
   });
 
+  it('reports a rotated map as not folded, even past 45 degrees', () => {
+    // The determinant's sign flips with the map rotation, so an upright fixture
+    // cannot tell the canonical (y-up) Jacobian from a y-down one: both read
+    // positive below 45 degrees. Only a rotation past 45 degrees pins the sign,
+    // where a y-down mix-up would flag a perfectly good map as folded.
+    for (const angle of [Math.PI / 3, (80 * Math.PI) / 180]) {
+      const points = rotatedGrid(angle);
+      const warp = computeMLSWarp(points, { lon0: MLS_LON0, lat0: MLS_LAT0 });
+      const state = computeFoldState(warp.geoToUV, points, MLS_LON0, MLS_LAT0);
+      expect(state.folded).toBe(false);
+      expect(state.minDet).toBeGreaterThan(0);
+    }
+  });
+
   it('flags a folded warp when a control point is misplaced', () => {
     const points = mlsGrid();
     // Swap the ground positions of two control points, folding the warp.
@@ -1081,6 +1112,29 @@ describe('createGeoreference', () => {
     // Exact at a control point through the closure.
     const uv = georef.geoToUV(points[0].lon, points[0].lat);
     expect(uv.u).toBeCloseTo(points[0].u, 9);
+  });
+
+  it('projects the image corners to the true footprint of a rotated map', () => {
+    // The extent is what the landing page classifies and badges against, so a
+    // sign error in the similarity fit shows up here as a footprint that is
+    // reflected about the map centre. The upright extent test above cannot see
+    // it, because a reflection fixes an upright map.
+    const points = rotatedGrid(ROTATED_THETA);
+    const georef = createGeoreference(points);
+    const { m } = georef.extentTransform;
+    for (const [u, v] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
+      const { x, y } = imageFramePoint(u, v);
+      // Ground truth: the fixture is q = t + ROTATED_SCALE·R(θ)·p in the
+      // canonical frame, so p = R(−θ)·(q − t)/ROTATED_SCALE.
+      const qx = x - 0.5;
+      const qy = y + 0.5;
+      const cos = Math.cos(ROTATED_THETA);
+      const sin = Math.sin(ROTATED_THETA);
+      const east = (cos * qx + sin * qy) / ROTATED_SCALE;
+      const north = (-sin * qx + cos * qy) / ROTATED_SCALE;
+      expect(m[0] * x + m[1] * y + m[2]).toBeCloseTo(east, 3);
+      expect(m[3] * x + m[4] * y + m[5]).toBeCloseTo(north, 3);
+    }
   });
 
   it('reports a folded MLS map through isFolded', () => {
