@@ -561,10 +561,10 @@ function solve2x2(a, b, c, d, e, f) {
  *   s   = num / den
  *   t   = q̄ − s·p̄
  *
- * It is used as the MLS map's `extentTransform`: projecting the image
- * corners through a global similarity gives a plausible footprint where the
- * local warp would extrapolate badly. At least two points are required, which
- * is always true on the MLS path (5+).
+ * It seeds the MLS map's extent fallback: projecting the image corners through
+ * a global similarity gives a plausible footprint where the local warp would
+ * extrapolate badly, and it is what the affine extent fitter degrades to when
+ * the control points are near-degenerate. At least two points are required.
  * @param {Array} points - [{u, v, lon, lat}, ...]
  * @param {number} lon0 - Origin longitude of the metric plane
  * @param {number} lat0 - Origin latitude of the metric plane
@@ -808,10 +808,13 @@ export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
     Number.isFinite(point.accuracy) ? Math.abs(point.accuracy) : 0
   );
 
-  // The global similarity: its inverse seeds the iterative `uvToGeo`, and
-  // its forward map is the fallback where a local fit is singular. It is stable
-  // everywhere the local warp is not.
-  const extent = computeLeastSquaresSimilarityTransform(
+  // The global extent: its inverse seeds the iterative `uvToGeo`, and its
+  // forward map is the fallback where a local fit is singular. A global affine
+  // captures an anisotropic map (a stretched scan, a ski panorama) that a
+  // similarity cannot; the fitter itself degrades to a similarity when the
+  // control points are near-degenerate, so it is stable everywhere the local
+  // warp is not.
+  const extent = computeLeastSquaresAffineTransform(
     referencePoints, origin.lon0, origin.lat0
   );
 
@@ -1049,8 +1052,9 @@ function createMatrixGeoreference(transform) {
  *   2 -> similarity, 3 -> affine, 4+ -> affine MLS
  *
  * `extentTransform` is the model itself for 2–3 points (preserving today's
- * footprint), and a least-squares similarity fit for MLS maps, so image
- * corners project to a plausible footprint rather than through the local warp.
+ * footprint), and a least-squares affine fit for MLS maps (degrading to a
+ * similarity for a near-degenerate control layout), so image corners project
+ * to a plausible footprint rather than through the local warp.
  * The fit is resolution-independent: reference points are stored as fractions
  * of `imageDivisor(W, H)`, so pixel dimensions are only needed by the callers
  * that convert to and from pixels (`mapMatch.js`, `MapViewer.svelte`).
@@ -1071,7 +1075,7 @@ export function createGeoreference(referencePoints) {
     lon0: origin.lon0,
     lat0: origin.lat0,
   });
-  const extentTransform = computeLeastSquaresSimilarityTransform(
+  const extentTransform = computeLeastSquaresAffineTransform(
     referencePoints, origin.lon0, origin.lat0
   );
   const foldState = computeFoldState(

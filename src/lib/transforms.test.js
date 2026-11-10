@@ -1220,15 +1220,32 @@ describe('createGeoreference', () => {
     expect(geoVia.lat).toBeCloseTo(geoDirect.lat, 12);
   });
 
-  it('uses a least-squares similarity extent for an MLS map', () => {
+  it('uses a least-squares affine extent for an MLS map', () => {
     const points = mlsGrid();
     const georef = createGeoreference(points);
     expect(georef.type).toBe('mls');
-    expect(georef.extentTransform.type).toBe('similarity');
+    expect(georef.extentTransform.type).toBe('affine');
     expect(georef.isFolded()).toBe(false);
     // Exact at a control point through the closure.
     const uv = georef.geoToUV(points[0].lon, points[0].lat);
     expect(uv.u).toBeCloseTo(points[0].u, 9);
+  });
+
+  it('projects the image corners to the true footprint of an anisotropic map', () => {
+    // The footprint is what the landing page classifies and badges against, so
+    // a similarity extent — which forces one uniform scale — bakes an
+    // anisotropic map's scale difference into the bounds. The affine extent
+    // must recover the true footprint where a similarity cannot.
+    const points = anisotropicGrid();
+    const georef = createGeoreference(points);
+    expect(georef.extentTransform.type).toBe('affine');
+    const { m } = georef.extentTransform;
+    for (const [u, v] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
+      const truth = anisotropicGround(u, v);
+      const { x, y } = imageFramePoint(u, v);
+      expect(m[0] * x + m[1] * y + m[2]).toBeCloseTo(truth.east, 4);
+      expect(m[3] * x + m[4] * y + m[5]).toBeCloseTo(truth.north, 4);
+    }
   });
 
   it('projects the image corners to the true footprint of a rotated map', () => {
