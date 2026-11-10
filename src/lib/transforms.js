@@ -882,10 +882,11 @@ export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
       b11 += w[i] * dpY * dpY;
     }
 
-    // M = A · B⁻¹. Solving M·B = A by Cramer's rule per column avoids forming
-    // B⁻¹ explicitly; B is singular when the local control points are collinear.
-    const bx = solve2x2(b00, b01, b10, b11, a00, a10);
-    const by = solve2x2(b00, b01, b10, b11, a01, a11);
+    // M = A · B⁻¹. B is symmetric, so Mᵀ = B⁻¹ · Aᵀ: each row of M is found by
+    // solving B · (M_row)ᵀ = (A_row)ᵀ by Cramer's rule, avoiding an explicit
+    // B⁻¹. B is singular when the local control points are collinear.
+    const bx = solve2x2(b00, b01, b10, b11, a00, a01);
+    const by = solve2x2(b00, b01, b10, b11, a10, a11);
     if (!bx || !by) {
       return null;
     }

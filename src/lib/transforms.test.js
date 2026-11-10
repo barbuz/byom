@@ -1025,6 +1025,31 @@ function warpedGrid() {
   return points;
 }
 
+// A rotated affine map: the ground-to-image linear part is a rotation, so it
+// is NOT symmetric. The other fixtures are axis-aligned (a diagonal/symmetric
+// linear part), which cannot distinguish M = A B⁻¹ from the transposed
+// M = Aᵀ B⁻¹ — this fixture can.
+const ROTATED_THETA = (30 * Math.PI) / 180;
+const ROTATED_SCALE = 1e-4;
+function rotatedPoint(east, north) {
+  const { lon, lat } = mlsToLonLat(east, north);
+  const c = Math.cos(ROTATED_THETA);
+  const s = Math.sin(ROTATED_THETA);
+  // Canonical frame q = s · R(θ) · p, then stored y-down (v = -q_y).
+  const qx = ROTATED_SCALE * (c * east - s * north);
+  const qy = ROTATED_SCALE * (s * east + c * north);
+  return { u: 0.5 + qx, v: 0.5 - qy, lon, lat, accuracy: null };
+}
+function rotatedGrid() {
+  const points = [];
+  for (let i = -2; i <= 2; i++) {
+    for (let j = -2; j <= 2; j++) {
+      points.push(rotatedPoint(i * 2000, j * 2000));
+    }
+  }
+  return points;
+}
+
 describe('computeLeastSquaresSimilarityTransform', () => {
   it('recovers the exact similarity from exactly-similarity correspondences', () => {
     const points = [
@@ -1101,6 +1126,21 @@ describe('computeMLSWarp', () => {
       const uv = warp.geoToUV(point.lon, point.lat);
       expect(uv.u).toBeCloseTo(point.u, 9);
       expect(uv.v).toBeCloseTo(point.v, 9);
+    }
+  });
+
+  it('reproduces a rotated (non-symmetric) affine map between control points', () => {
+    // The affine MLS must recover any affine map exactly, at interior points
+    // too, not just at the control points. A rotation makes the linear part
+    // non-symmetric, which is what distinguishes M = A·B⁻¹ from the transposed
+    // M = Aᵀ·B⁻¹; an axis-aligned fixture cannot tell the two apart.
+    const warp = computeMLSWarp(rotatedGrid(), { lon0: MLS_LON0, lat0: MLS_LAT0 });
+    for (const [east, north] of [[500, 700], [-1500, 1200], [2500, -1800], [0, 0]]) {
+      const expected = rotatedPoint(east, north);
+      const ground = mlsToLonLat(east, north);
+      const uv = warp.geoToUV(ground.lon, ground.lat);
+      expect(uv.u).toBeCloseTo(expected.u, 6);
+      expect(uv.v).toBeCloseTo(expected.v, 6);
     }
   });
 
