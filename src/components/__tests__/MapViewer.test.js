@@ -708,16 +708,15 @@ describe("MapViewer moving-least-squares warp", () => {
   const FOLDED = MLS_POINTS.map((point) =>
     point.id === 3 ? { ...point, lon: -74.0, lat: 40.5 } : point);
 
-  it("labels the model as a moving-least-squares warp for 5+ points", async () => {
-    getReferencePoints.mockResolvedValue(MLS_POINTS);
+  it("labels the model as a moving-least-squares warp for 4+ points", async () => {
+    getReferencePoints.mockResolvedValue(MLS_POINTS.slice(0, 4));
     await mountViewer();
     await sleep(30);
 
-    fireEvent.click(screen.getByText(/Points \(5\)/));
+    fireEvent.click(screen.getByText(/Points \(4\)/));
     await flushPromises();
 
-    await screen.findByText(/Moving-least-squares warp \(5 points\)/);
-    assert.equal(screen.queryByText(/Homography transform/), null);
+    await screen.findByText(/Moving-least-squares warp \(4 points\)/);
   });
 
   it("warns that a reference point is likely misplaced when the warp folds", async () => {

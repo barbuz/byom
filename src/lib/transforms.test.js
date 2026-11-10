@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
   computeSimilarityTransform,
   computeAffineTransform,
-  computeHomographyTransform,
   uvToGeo,
   geoToUV,
   calculateTransform,
@@ -380,216 +379,6 @@ describe('computeAffineTransform + uvToGeo', () => {
   });
 });
 
-describe('computeHomographyTransform', () => {
-  // A projective map: the ground plane is viewed at an angle, so ground
-  // position varies as a rational function of the pixel coordinates. The
-  // stored (u, v) are the pixels over a divisor of 1000.
-  const homographyRefs = [
-    { u: 0, v: 0, lon: 8.00, lat: 45.00 },
-    { u: 1, v: 0, lon: 8.02, lat: 45.00 },
-    { u: 1, v: 0.8, lon: 8.03, lat: 45.01 },
-    { u: 0, v: 1, lon: 8.00, lat: 45.02 },
-  ];
-
-  it('maps four reference points exactly', () => {
-    const t = computeHomographyTransform(homographyRefs);
-    expect(t.type).toBe('homography');
-    expectMatrixShape(t);
-    for (const p of homographyRefs) {
-      const geo = uvToGeo(p.u, p.v, t);
-      expect(geo.lon).toBeCloseTo(p.lon, 6);
-      expect(geo.lat).toBeCloseTo(p.lat, 6);
-    }
-  });
-
-  it('round-trips a projective transform', () => {
-    const t = computeHomographyTransform(homographyRefs);
-    for (const [u, v] of [[0.25, 0.125], [0.999, 0.401], [0.01, 0.99]]) {
-      const geo = uvToGeo(u, v, t);
-      const img = geoToUV(geo.lon, geo.lat, t);
-      expect(img.u).toBeCloseTo(u, 6);
-      expect(img.v).toBeCloseTo(v, 6);
-    }
-  });
-
-  it('fits a true projective mapping exactly, where an affine cannot', () => {
-    // Ground truth: pixel -> metric plane via a genuine perspective divide.
-    // Stored coordinates are the pixels over a divisor of 1000.
-    const lon0 = 8;
-    const lat0 = 45;
-    const divisor = 1000;
-    const truth = (x, y) => {
-      const w = 1 + 2e-4 * x + 1e-4 * y;
-      return {
-        east: (10 * x + 2 * y) / w,
-        north: (1 * x + 10 * y) / w,
-      };
-    };
-    const toLonLat = ({ east, north }) => localMetersToLonLat(east, north, lon0, lat0);
-    const corners = [[0, 0], [1000, 0], [1000, 1000], [0, 1000]];
-    const refs = corners.map(([x, y]) => ({ u: x / divisor, v: y / divisor, ...toLonLat(truth(x, y)) }));
-
-    const homography = computeHomographyTransform(refs);
-    for (const [x, y] of [[500, 500], [123, 987], [800, 50]]) {
-      const geo = uvToGeo(x / divisor, y / divisor, homography);
-      const expected = toLonLat(truth(x, y));
-      expect(geo.lon).toBeCloseTo(expected.lon, 9);
-      expect(geo.lat).toBeCloseTo(expected.lat, 9);
-    }
-  });
-
-  it('reduces to the affine solution when the map is not perspective-distorted', () => {
-    // For a planar, unrotated map the projective terms vanish, so the
-    // homography agrees with the affine fit of the same four corners.
-    const refs = [
-      { u: 0, v: 0, lon: 1, lat: 2 },
-      { u: 0.5, v: 0, lon: 3, lat: 2 },
-      { u: 0.5, v: 0.5, lon: 3, lat: 4 },
-      { u: 0, v: 0.5, lon: 1, lat: 4 },
-    ];
-    const homography = computeHomographyTransform(refs);
-    const affine = computeAffineTransform(refs);
-    expect(homography.m[6]).toBeCloseTo(0, 9);
-    expect(homography.m[7]).toBeCloseTo(0, 9);
-    for (const p of refs) {
-      const viaHomography = uvToGeo(p.u, p.v, homography);
-      const viaAffine = uvToGeo(p.u, p.v, affine);
-      expect(viaHomography.lon).toBeCloseTo(viaAffine.lon, 9);
-      expect(viaHomography.lat).toBeCloseTo(viaAffine.lat, 9);
-    }
-  });
-
-  it('throws when fewer than 4 reference points', () => {
-    const three = homographyRefs.slice(0, 3);
-    expect(() => computeHomographyTransform(three))
-      .toThrow('Need at least 4 reference points for homography transform');
-  });
-
-  it('throws for degenerate points', () => {
-    // Three collinear image points make the DLT system singular.
-    const collinear = [
-      { u: 0, v: 0, lon: 1, lat: 2 },
-      { u: 0.1, v: 0.1, lon: 3, lat: 4 },
-      { u: 0.2, v: 0.2, lon: 5, lat: 6 },
-      { u: 0.3, v: 0.3, lon: 7, lat: 8 },
-    ];
-    expect(() => computeHomographyTransform(collinear))
-      .toThrow('Points are degenerate, cannot compute homography transform');
-  });
-
-  it('throws for a degenerate rectangle where two corners coincide', () => {
-    const doubled = [
-      { u: 0, v: 0, lon: 1, lat: 2 },
-      { u: 1, v: 0, lon: 3, lat: 2 },
-      { u: 1, v: 0, lon: 3, lat: 2 },
-      { u: 0, v: 1, lon: 1, lat: 4 },
-    ];
-    expect(() => computeHomographyTransform(doubled))
-      .toThrow('Points are degenerate, cannot compute homography transform');
-  });
-
-  it('throws when a single point is repeated and normalization cannot scale', () => {
-    // All four points coincide, so the mean distance normalization would
-    // divide by zero; the guard falls back to a unit scale and the singular
-    // system is then rejected as usual.
-    const coincident = [
-      { u: 0.7, v: 0.9, lon: 1, lat: 2 },
-      { u: 0.7, v: 0.9, lon: 1, lat: 2 },
-      { u: 0.7, v: 0.9, lon: 1, lat: 2 },
-      { u: 0.7, v: 0.9, lon: 1, lat: 2 },
-    ];
-    expect(() => computeHomographyTransform(coincident))
-      .toThrow('Points are degenerate, cannot compute homography transform');
-  });
-
-  it('throws when the fit overflows to a non-finite matrix', () => {
-    // Enormous but finite inputs can overflow the fit into a matrix with
-    // non-finite coefficients; such a transform must be rejected rather than
-    // silently poisoning every subsequent projection.
-    const overflowing = [
-      { u: 0, v: 0, lon: 0, lat: 0 },
-      { u: 1e308, v: 0, lon: 1, lat: 0 },
-      { u: 1e308, v: 1e308, lon: 1, lat: 1 },
-      { u: 0, v: 1e308, lon: 0, lat: 1 },
-    ];
-    expect(() => computeHomographyTransform(overflowing))
-      .toThrow('Points are degenerate, cannot compute homography transform');
-  });
-});
-
-describe('homography conditioning', () => {
-  // Ground truth is a genuine perspective divide on the metric plane, so a
-  // correct fit reproduces it exactly and a badly conditioned one drifts.
-  // Stored coordinates are the pixels over the span, so the fractional plane
-  // is always unit-span regardless of how many pixels the image has.
-  const perspectiveRefs = (pixelSpan) => {
-    const lon0 = 8;
-    const lat0 = 45;
-    const truth = (x, y) => {
-      const w = 1 + 2e-4 * (x / pixelSpan) + 1e-4 * (y / pixelSpan);
-      return { east: (10 * x + 2 * y) / w, north: (1 * x + 10 * y) / w };
-    };
-    const refs = [[0, 0], [pixelSpan, 0], [pixelSpan, pixelSpan], [0, pixelSpan]]
-      .map(([x, y]) => ({
-        u: x / pixelSpan,
-        v: y / pixelSpan,
-        ...localMetersToLonLat(truth(x, y).east, truth(x, y).north, lon0, lat0),
-      }));
-    return { refs, truth, lon0, lat0, pixelSpan };
-  };
-
-  // The raw DLT design matrix grows worse conditioned with map size; Hartley
-  // normalization holds it at a constant ~2.6. These checks assert the
-  // observable consequence: the fit stays exact even for a large image, where
-  // a raw solve would lose precision.
-  it.each([1000, 4000, 12000])('fits a %d px image perspective map to float64 precision', (pixelSpan) => {
-    const { refs, truth, lon0, lat0 } = perspectiveRefs(pixelSpan);
-    const t = computeHomographyTransform(refs);
-    expectMatrixShape(t);
-
-    for (const [x, y] of [[pixelSpan / 2, pixelSpan / 2], [123, pixelSpan - 129], [0.9 * pixelSpan, 50]]) {
-      const geo = uvToGeo(x / pixelSpan, y / pixelSpan, t);
-      const expected = localMetersToLonLat(truth(x, y).east, truth(x, y).north, lon0, lat0);
-      expect(geo.lon).toBeCloseTo(expected.lon, 9);
-      expect(geo.lat).toBeCloseTo(expected.lat, 9);
-    }
-  });
-
-  it('keeps the coefficients finite and the projective terms physical at 12,000 px', () => {
-    const { refs } = perspectiveRefs(12000);
-    const t = computeHomographyTransform(refs);
-    // Projective terms are non-zero but bounded, because the fractional input
-    // plane is unit-span whatever the pixel span was.
-    expect(t.m[6]).not.toBe(0);
-    expect(t.m[7]).not.toBe(0);
-    expect(Math.abs(t.m[6])).toBeLessThan(1);
-    expect(Math.abs(t.m[7])).toBeLessThan(1);
-    expect(t.m[8]).toBeCloseTo(1, 12);
-  });
-
-  it('agrees with the affine fit on a large, unrotated, non-perspective map', () => {
-    // The denormalized matrix must reduce to affine when there is no
-    // perspective, at the scale where conditioning used to hurt most.
-    const lon0 = 8;
-    const lat0 = 45;
-    const refs = [[0, 0], [12000, 0], [12000, 12000], [0, 12000]].map(([x, y]) => ({
-      u: x / 12000,
-      v: y / 12000,
-      ...localMetersToLonLat(3 * x, 4 * y, lon0, lat0),
-    }));
-    const homography = computeHomographyTransform(refs);
-    const affine = computeAffineTransform(refs);
-    expect(homography.m[6]).toBeCloseTo(0, 9);
-    expect(homography.m[7]).toBeCloseTo(0, 9);
-    for (const [u, v] of [[0.5, 0.5], [0.01, 0.99]]) {
-      const a = uvToGeo(u, v, affine);
-      const h = uvToGeo(u, v, homography);
-      expect(h.lon).toBeCloseTo(a.lon, 9);
-      expect(h.lat).toBeCloseTo(a.lat, 9);
-    }
-  });
-});
-
 describe('antimeridian-crossing maps', () => {
   // A map spanning 0.4 degrees of longitude at 60N, centred on the date line,
   // so its corners sit at 179.8 and -179.8 and its middle is on it. Stored
@@ -645,27 +434,23 @@ describe('antimeridian-crossing maps', () => {
     expect(mid.lat).toBeCloseTo(60, 9);
   });
 
-  it('affine and homography map the crossing corners exactly', () => {
-    for (const t of [
-      computeAffineTransform(corners),
-      computeHomographyTransform(corners),
-    ]) {
-      expectMatrixShape(t);
-      // The origin sits inside the map's 0.2-degree span, not on the far side
-      // of the planet as a naive mean would put it.
-      expect(Math.abs(t.lon0)).toBeGreaterThan(179.8);
-      expect(Math.abs(t.lon0)).toBeLessThanOrEqual(180);
-      for (const p of corners) {
-        const geo = uvToGeo(p.u, p.v, t);
-        expect(geo.lon).toBeCloseTo(p.lon, 9);
-        expect(geo.lat).toBeCloseTo(p.lat, 9);
-      }
-      // Interior points land where the underlying pixel-to-degree map says,
-      // with 180 wrapped back to -180.
-      const interior = uvToGeo(0.5, 0.4, t);
-      expect(interior.lon).toBeCloseTo(-180, 9);
-      expect(interior.lat).toBeCloseTo(60.16, 9);
+  it('affine maps the crossing corners exactly', () => {
+    const t = computeAffineTransform(corners);
+    expectMatrixShape(t);
+    // The origin sits inside the map's 0.2-degree span, not on the far side
+    // of the planet as a naive mean would put it.
+    expect(Math.abs(t.lon0)).toBeGreaterThan(179.8);
+    expect(Math.abs(t.lon0)).toBeLessThanOrEqual(180);
+    for (const p of corners) {
+      const geo = uvToGeo(p.u, p.v, t);
+      expect(geo.lon).toBeCloseTo(p.lon, 9);
+      expect(geo.lat).toBeCloseTo(p.lat, 9);
     }
+    // Interior points land where the underlying pixel-to-degree map says,
+    // with 180 wrapped back to -180.
+    const interior = uvToGeo(0.5, 0.4, t);
+    expect(interior.lon).toBeCloseTo(-180, 9);
+    expect(interior.lat).toBeCloseTo(60.16, 9);
   });
 
   it('geoDistanceToUV stays finite for a point on the line', () => {
@@ -687,7 +472,6 @@ describe('reference point validation', () => {
   const fitters = [
     ['similarity', (refs) => computeSimilarityTransform(refs.slice(0, 2))],
     ['affine', (refs) => computeAffineTransform(refs.slice(0, 3))],
-    ['homography', (refs) => computeHomographyTransform(refs)],
   ];
 
   it.each(fitters)('%s rejects a null coordinate', (_name, fit) => {
@@ -712,13 +496,6 @@ describe('reference point validation', () => {
       refs[1].lat = bad;
       expect(() => fit(refs)).toThrow('Reference points must have finite coordinates');
     }
-  });
-
-  it('leaves the extra points beyond the fit untouched by validation', () => {
-    // Only the points a model actually uses are validated, so a malformed 5th
-    // point does not break the 4-point homography.
-    const refs = [...valid, { u: 0, v: 0, lon: null, lat: null }];
-    expect(() => computeHomographyTransform(refs)).not.toThrow();
   });
 });
 
@@ -789,15 +566,15 @@ describe('geoDistanceToUV', () => {
     expect(geoDistanceToUV(8.005, 45.005, 500, t)).toBeGreaterThan(0);
   });
 
-  it('works for a homography transform', () => {
+  it('works for an affine moving-least-squares warp', () => {
     const refs = [
       { u: 0, v: 0, lon: 8.00, lat: 45.00 },
       { u: 1, v: 0, lon: 8.02, lat: 45.00 },
       { u: 1, v: 0.8, lon: 8.03, lat: 45.01 },
       { u: 0, v: 1, lon: 8.00, lat: 45.02 },
     ];
-    const t = computeHomographyTransform(refs);
-    const d = geoDistanceToUV(8.01, 45.005, 500, t);
+    const warp = computeMLSWarp(refs);
+    const d = geoDistanceToUV(8.01, 45.005, 500, warp);
     expect(d).toBeGreaterThan(0);
     expect(Number.isFinite(d)).toBe(true);
   });
@@ -811,7 +588,7 @@ describe('calculateTransform', () => {
     expect(calculateTransform(one)).toBeNull();
   });
 
-  it('chooses similarity for two, affine for three, homography for four', () => {
+  it('chooses similarity for two points and affine for three or more', () => {
     const two = [
       { u: 0, v: 0, lon: 1, lat: 2 },
       { u: 0.5, v: 0, lon: 3, lat: 2 },
@@ -827,7 +604,7 @@ describe('calculateTransform', () => {
 
     expect(calculateTransform(two).type).toBe('similarity');
     expect(calculateTransform(three).type).toBe('affine');
-    expect(calculateTransform(four).type).toBe('homography');
+    expect(calculateTransform(four).type).toBe('affine');
   });
 
   it('returns a transform object directly, with no wrapper', () => {
@@ -865,12 +642,10 @@ describe('transformIsMirrored', () => {
   it('reports a correctly georeferenced map as not mirrored, for every model', () => {
     expect(transformIsMirrored(computeSimilarityTransform(refs(northUp, 2)))).toBe(false);
     expect(transformIsMirrored(computeAffineTransform(refs(northUp, 3)))).toBe(false);
-    expect(transformIsMirrored(computeHomographyTransform(refs(northUp, 4)))).toBe(false);
   });
 
-  it('detects a mirrored correspondence for the affine and homography fits', () => {
+  it('detects a mirrored correspondence for the affine fit', () => {
     expect(transformIsMirrored(computeAffineTransform(refs(mirror, 3)))).toBe(true);
-    expect(transformIsMirrored(computeHomographyTransform(refs(mirror, 4)))).toBe(true);
   });
 
   it('treats two points as ambiguous: a similarity cannot distinguish a reflection', () => {
@@ -942,11 +717,11 @@ describe('uvToGeo and geoToUV error cases', () => {
   });
 
   it('throws when a point maps to infinity', () => {
-    // The canonical-frame line 2x + y = 0 is the horizon, where w = 0. With
+    // The canonical-frame line 2x + y = 0 is where the homogeneous divisor
+    // w = 0, so a matrix with that projective row maps it to infinity. With
     // y = -v that is the image-space line 2u - v = 0, so (u, v) = (1, 2).
     const projective = {
       m: [1, 0, 0, 0, 1, 0, 2, 1, 0],
-      type: 'homography',
       lon0: 0,
       lat0: 0,
     };
@@ -956,12 +731,11 @@ describe('uvToGeo and geoToUV error cases', () => {
   });
 
   it('throws when the inverse maps a point to infinity', () => {
-    // An invertible homography whose projective row is (1, 1, 1): every image
+    // An invertible matrix whose projective row is (1, 1, 1): every image
     // point maps to a finite position, but the metric-space horizon east +
     // north = -1 has no finite image.
     const projective = {
       m: [1, 0, 0, 0, 1, 0, 1, 1, 1],
-      type: 'homography',
       lon0: 0,
       lat0: 0,
     };
@@ -1004,8 +778,8 @@ function mlsGrid() {
 }
 
 // A deliberately non-projective map: a uniform ground grid whose image is
-// warped by a quadratic radial term, so no single homography (let alone
-// affine) fits it. This is the metro/ski case the MLS warp exists for.
+// warped by a quadratic radial term, so no single affine (let alone
+// similarity) fits it. This is the metro/ski case the MLS warp exists for.
 function warpedPoint(east, north) {
   const { lon, lat } = mlsToLonLat(east, north);
   const bx = east / 10000;
@@ -1115,8 +889,8 @@ describe('computeLeastSquaresSimilarityTransform', () => {
 });
 
 describe('computeMLSWarp', () => {
-  it('requires at least five points', () => {
-    expect(() => computeMLSWarp(mlsGrid().slice(0, 4))).toThrow('Need at least 5 reference points for an MLS warp');
+  it('requires at least four points', () => {
+    expect(() => computeMLSWarp(mlsGrid().slice(0, 3))).toThrow('Need at least 4 reference points for an MLS warp');
   });
 
   it('is exact at every control point when accuracy is null (sigma = 0)', () => {
@@ -1268,7 +1042,7 @@ describe('createGeoreference', () => {
     expect(createGeoreference(null)).toBeNull();
   });
 
-  it('follows the model ladder: 2 similarity, 3 affine, 4 homography, 5+ mls', () => {
+  it('follows the model ladder: 2 similarity, 3 affine, 4+ mls', () => {
     const corners = [
       mlsPoint(-2000, -2000),
       mlsPoint(2000, -2000),
@@ -1278,7 +1052,7 @@ describe('createGeoreference', () => {
     ];
     expect(createGeoreference(corners.slice(0, 2)).type).toBe('similarity');
     expect(createGeoreference(corners.slice(0, 3)).type).toBe('affine');
-    expect(createGeoreference(corners.slice(0, 4)).type).toBe('homography');
+    expect(createGeoreference(corners.slice(0, 4)).type).toBe('mls');
     expect(createGeoreference(corners.slice(0, 5)).type).toBe('mls');
   });
 

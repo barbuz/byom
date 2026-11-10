@@ -994,8 +994,6 @@
             ✓ Similarity transform
           {:else if referencePoints.length === 3}
             ✓ Affine transform ({referencePoints.length} points)
-          {:else if referencePoints.length === 4}
-            ✓ Homography transform ({referencePoints.length} points)
           {:else}
             ✓ Moving-least-squares warp ({referencePoints.length} points)
           {/if}

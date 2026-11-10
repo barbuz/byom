@@ -1,12 +1,11 @@
 /**
  * Coordinate transformation utilities for BYOM.
  *
- * Similarity, affine and homography all map image coordinates to local
- * east/north metres and share the same homogeneous 3x3 matrix representation,
- * so callers only ever hold one shape: the fitted matrix, its type label, and
- * the metric plane's origin. Ground distance per degree varies with latitude,
- * so a fit is only isotropic in that metric plane; every model is therefore
- * fitted there.
+ * Similarity and affine map image coordinates to local east/north metres and
+ * share the same homogeneous 3x3 matrix representation, so callers only ever
+ * hold one shape: the fitted matrix, its type label, and the metric plane's
+ * origin. Ground distance per degree varies with latitude, so a fit is only
+ * isotropic in that metric plane; every model is therefore fitted there.
  *
  * Image coordinates are stored and fitted as fractions of a single divisor,
  * `u = imageX / D` and `v = imageY / D` with `D = max(imageWidth, imageHeight)`.
@@ -22,7 +21,7 @@
  * transform boundary. This matters for orientation: the map image is an
  * orientation-reversing view of the ground (its y axis points the other way),
  * so fitting in the raw `(u, v)` frame would either mirror a similarity or push
- * the reflection into the affine/homography coefficients, leaving no uniform
+ * the reflection into the affine coefficients, leaving no uniform
  * way to tell a correct fit from a reflected one. In the canonical frame a
  * correctly georeferenced map always has a positive determinant, and a negative
  * one unambiguously means the correspondences are mirrored, which
@@ -33,7 +32,7 @@
  *   [m0 m1 m2]
  *   [m3 m4 m5]
  *   [m6 m7 m8]
- * with m6/m7 zero for the similarity and affine cases.
+ * with m6/m7 zero for both models.
  */
 
 // Mean metres per degree of latitude, adequate for a local planar fit.
@@ -136,8 +135,8 @@ function imageFrameToUV(x, y) {
 
 /**
  * Determinant of a row-major 3x3 matrix, used to check orientation. For an
- * affine or projective map of the plane it is the signed factor by which the
- * transform scales oriented area.
+ * affine map of the plane it is the signed factor by which the transform
+ * scales oriented area.
  * @param {Array<number>} m
  * @returns {number}
  */
@@ -156,9 +155,6 @@ function matrixDeterminant(m) {
  * typed into the wrong field). Maps are not generally mirrored, so this is worth
  * surfacing as a likely error rather than rendering silently.
  *
- * The projective denominator must keep a single sign over the map for
- * orientation to be defined; a homography that folds the plane is degenerate,
- * and `calculateTransform` does not produce one from well-separated points.
  * @param {Object|null} transform - Transform object {m, type, lon0, lat0}
  * @returns {boolean}
  */
@@ -239,62 +235,6 @@ function solveLinearSystem(matrix, vector) {
   }
 
   return rows.map((row, index) => row[size] / row[index]);
-}
-
-/**
- * Hartley isotropic normalization for a set of 2D points: translate their
- * centroid to the origin and scale so their mean distance from it is sqrt(2).
- *
- * A DLT design matrix built from raw pixels and metres is badly conditioned
- * and the condition number grows with map size (measured cond ~2.5e7 at
- * 1,000 px and ~3.6e9 at 12,000 px for a 1,000 km map); normalizing both
- * planes collapses it to a constant ~3.1. The raw solve is still accurate at
- * these scales, so this is robustness rather than a user-visible fix, but it
- * removes the dependence on resolution and keeps precision for the planned
- * least-squares fit, whose normal equations would square the condition number.
- * @param {Array} points - [{x, y}, ...]
- * @returns {Object} {points, matrix, inverseMatrix} - Normalized points and
- *   the 3x3 transforms into and out of the normalized frame.
- */
-function normalizePoints(points) {
-  let cx = 0;
-  let cy = 0;
-  for (const point of points) {
-    cx += point.x;
-    cy += point.y;
-  }
-  cx /= points.length;
-  cy /= points.length;
-
-  let meanDistance = 0;
-  for (const point of points) {
-    meanDistance += Math.hypot(point.x - cx, point.y - cy);
-  }
-  meanDistance /= points.length;
-  const scale = meanDistance > 0 ? Math.SQRT2 / meanDistance : 1;
-
-  return {
-    points: points.map(({ x, y }) => ({ x: (x - cx) * scale, y: (y - cy) * scale })),
-    matrix: [scale, 0, -scale * cx, 0, scale, -scale * cy, 0, 0, 1],
-    inverseMatrix: [1 / scale, 0, cx, 0, 1 / scale, cy, 0, 0, 1],
-  };
-}
-
-/**
- * Multiply two row-major 3x3 matrices.
- * @param {Array<number>} a
- * @param {Array<number>} b
- * @returns {Array<number>}
- */
-function multiplyMatrices(a, b) {
-  const result = new Array(9);
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 3; col++) {
-      result[row * 3 + col] =
-        a[row * 3] * b[col] + a[row * 3 + 1] * b[3 + col] + a[row * 3 + 2] * b[6 + col];
-    }
-  }
-  return result;
 }
 
 /**
@@ -442,66 +382,6 @@ export function computeAffineTransform(referencePoints) {
 }
 
 /**
- * Compute a homography (4 points) by direct linear transform, fitted in the
- * local metric plane with the matrix normalized so m8 = 1. Uses the canonical
- * y-up image frame (`x = u`, `y = -v`), so a correct map has a positive
- * determinant and a mirrored correspondence a negative one.
- *
- * Both planes are Hartley-normalized before the solve and the result is
- * denormalized afterwards, which keeps the DLT design matrix well conditioned
- * regardless of map size and resolution.
- * @param {Array} referencePoints - [{u, v, lon, lat}, ...]
- * @returns {Object} Transform {m, type, lon0, lat0}
- */
-export function computeHomographyTransform(referencePoints) {
-  if (referencePoints.length < 4) {
-    throw new Error('Need at least 4 reference points for homography transform');
-  }
-
-  const used = referencePoints.slice(0, 4);
-  assertFinitePoints(used);
-  const { lon0, lat0 } = planeOrigin(used);
-
-  const imagePoints = used.map(({ u, v }) => imageFramePoint(u, v));
-  const metricPoints = used.map((point) =>
-    lonLatToLocalMeters(point.lon, point.lat, lon0, lat0)
-  );
-  const image = normalizePoints(imagePoints);
-  const metric = normalizePoints(metricPoints.map(({ east, north }) => ({ x: east, y: north })));
-
-  const rows = [];
-  const values = [];
-
-  for (let i = 0; i < used.length; i++) {
-    const { x: imageX, y: imageY } = image.points[i];
-    const { x: east, y: north } = metric.points[i];
-    rows.push([imageX, imageY, 1, 0, 0, 0, -imageX * east, -imageY * east]);
-    values.push(east);
-    rows.push([0, 0, 0, imageX, imageY, 1, -imageX * north, -imageY * north]);
-    values.push(north);
-  }
-
-  // Singular when the four points are degenerate (e.g. three of them collinear).
-  const solution = solveLinearSystem(rows, values);
-  if (!solution) {
-    throw new Error('Points are degenerate, cannot compute homography transform');
-  }
-
-  const normalized = [...solution, 1];
-  const m = multiplyMatrices(
-    metric.inverseMatrix,
-    multiplyMatrices(normalized, image.matrix)
-  );
-
-  // The denormalized matrix is only defined up to scale; restore the m8 = 1
-  // convention the rest of the code assumes.
-  if (!m.every(Number.isFinite) || Math.abs(m[8]) < PIVOT_EPSILON) {
-    throw new Error('Points are degenerate, cannot compute homography transform');
-  }
-  return { m: m.map(value => value / m[8]), type: 'homography', lon0, lat0 };
-}
-
-/**
  * Whether an object is a Georeference (see `createGeoreference`) rather than a
  * bare matrix transform. A local warp has no single matrix, so the two shapes
  * are told apart by the warp methods the georeference exposes.
@@ -628,9 +508,9 @@ export function geoDistanceToUV(lon, lat, meters, transform) {
 }
 
 /**
- * Fit the appropriate model for the number of reference points available:
- * two -> similarity, three -> affine, four -> homography. Extra points are
- * ignored by the matrix models; callers that want a local warp for 5+ points
+ * Fit the appropriate matrix model for the number of reference points
+ * available: two -> similarity, three or more -> affine. Extra points are
+ * ignored by the matrix models; callers that want a local warp for 4+ points
  * use `createGeoreference`, which escalates to affine MLS. Kept exported and
  * matrix-only for the landing page and tests.
  * @param {Array} referencePoints
@@ -643,10 +523,7 @@ export function calculateTransform(referencePoints) {
   if (referencePoints.length === 2) {
     return computeSimilarityTransform(referencePoints);
   }
-  if (referencePoints.length === 3) {
-    return computeAffineTransform(referencePoints);
-  }
-  return computeHomographyTransform(referencePoints);
+  return computeAffineTransform(referencePoints);
 }
 
 /**
@@ -792,6 +669,10 @@ export function computeLeastSquaresSimilarityTransform(points, lon0, lat0) {
  * control points are collinear; `sigma_i = 0` (null accuracy) reproduces plain
  * 1/d² interpolating MLS and makes the warp exact at the control points.
  *
+ * Four control points are the minimum: with four affine MLS is already
+ * well-posed, and it reproduces an affine map exactly, so it degrades to the
+ * affine fit rather than diverging when the map has no warp.
+ *
  * @param {Array} referencePoints - [{u, v, lon, lat, accuracy}, ...]
  * @param {Object} [options]
  * @param {number} [options.lon0] - Metric plane origin longitude.
@@ -799,8 +680,8 @@ export function computeLeastSquaresSimilarityTransform(points, lon0, lat0) {
  * @returns {Object} { geoToUV, uvToGeo, lon0, lat0, points }
  */
 export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
-  if (referencePoints.length < 5) {
-    throw new Error('Need at least 5 reference points for an MLS warp');
+  if (referencePoints.length < 4) {
+    throw new Error('Need at least 4 reference points for an MLS warp');
   }
   assertFinitePoints(referencePoints);
 
@@ -1056,9 +937,9 @@ function createMatrixGeoreference(transform) {
  * every consumer holds, so a local warp (no single matrix) and the matrix
  * models share one shape. The model ladder is deterministic:
  *
- *   2 -> similarity, 3 -> affine, 4 -> homography, 5+ -> affine MLS
+ *   2 -> similarity, 3 -> affine, 4+ -> affine MLS
  *
- * `extentTransform` is the model itself for 2–4 points (preserving today's
+ * `extentTransform` is the model itself for 2–3 points (preserving today's
  * footprint), and a least-squares similarity fit for MLS maps, so image
  * corners project to a plausible footprint rather than through the local warp.
  * The fit is resolution-independent: reference points are stored as fractions
@@ -1072,7 +953,7 @@ export function createGeoreference(referencePoints) {
     return null;
   }
 
-  if (referencePoints.length < 5) {
+  if (referencePoints.length < 4) {
     return createMatrixGeoreference(calculateTransform(referencePoints));
   }
 
