@@ -320,7 +320,7 @@ describe('mapMatch classification', () => {
 
 describe('mapMatch georeference interface', () => {
   it('classifies an MLS map through geoToUV and its least-squares extent', () => {
-    // 5+ points take the MLS path; the footprint and containment come from the
+    // 4+ points take the MLS path; the footprint and containment come from the
     // georeference's extent transform.
     const gridPoints = [
       { u: 0, v: 0, lon: 8.0, lat: 47.0 },
