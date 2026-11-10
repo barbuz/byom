@@ -56,6 +56,7 @@ export default defineConfig({
         'src/lib/mapMatch.js': { lines: 100 },
         'src/lib/geolocation.js': { lines: 100 },
         'src/lib/viewport.js': { lines:  99 },
+        'src/lib/grid.js': { lines: 100 },
         'src/lib/draw.js': { lines:  99 },
         'src/lib/db.js': { lines: 100 },
         'src/components/UserPositionMarker.svelte': { lines: 100 },

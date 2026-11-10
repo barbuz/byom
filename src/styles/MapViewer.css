@@ -101,6 +101,11 @@ canvas {
   color: white;
 }
 
+.grid-btn.active {
+  background: #4CAF50;
+  color: white;
+}
+
 @keyframes pulse {
   0%, 100% { box-shadow: 0 2px 8px rgba(0,0,0,0.3); }
   50% { box-shadow: 0 2px 16px rgba(255, 152, 0, 0.6); }

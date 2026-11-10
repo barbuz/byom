@@ -1,14 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import {
   applyImageTransform,
+  drawGraticule,
   drawPendingPoint,
   drawReferencePoints,
   drawUserMarker,
 } from './draw.js';
 import { calculateTransform } from './transforms.js';
+import { buildGraticule } from './grid.js';
 
 function fakeCtx() {
-  return { calls: [], translate(...a) { this.calls.push(['translate', a]); }, rotate(...a) { this.calls.push(['rotate', a]); }, scale(...a) { this.calls.push(['scale', a]); }, transform(...a) { this.calls.push(['transform', a]); }, arc(...a) { this.calls.push(['arc', a]); }, fill() { this.calls.push(['fill']); }, stroke() { this.calls.push(['stroke']); }, beginPath() { this.calls.push(['beginPath']); }, setLineDash(...a) { this.calls.push(['setLineDash', a]); }, save() { this.calls.push(['save']); }, restore() { this.calls.push(['restore']); }, measureText(t) { this.calls.push(['measureText', t]); return { width: 30 }; }, fillRect(...a) { this.calls.push(['fillRect', a]); }, fillText(...a) { this.calls.push(['fillText', a]); }, set fillStyle(v) { this.fs = v; this.calls.push(['fillStyle', v]); }, get fillStyle() { return this.fs; }, set strokeStyle(v) { this.ss = v; this.calls.push(['strokeStyle', v]); }, get strokeStyle() { return this.ss; }, set lineWidth(v) { this.lw = v; }, get lineWidth() { return this.lw; }, set font(v) { this.fn = v; }, get font() { return this.fn; }, set textAlign(v) { this.ta = v; }, get textAlign() { return this.ta; }, set textBaseline(v) { this.tb = v; }, get textBaseline() { return this.tb; } };
+  return { calls: [], translate(...a) { this.calls.push(['translate', a]); }, rotate(...a) { this.calls.push(['rotate', a]); }, scale(...a) { this.calls.push(['scale', a]); }, transform(...a) { this.calls.push(['transform', a]); }, arc(...a) { this.calls.push(['arc', a]); }, fill() { this.calls.push(['fill']); }, stroke() { this.calls.push(['stroke']); }, beginPath() { this.calls.push(['beginPath']); }, rect(...a) { this.calls.push(['rect', a]); }, clip() { this.calls.push(['clip']); }, moveTo(...a) { this.calls.push(['moveTo', a]); }, lineTo(...a) { this.calls.push(['lineTo', a]); }, bezierCurveTo(...a) { this.calls.push(['bezierCurveTo', a]); }, strokeText(...a) { this.calls.push(['strokeText', a]); }, setLineDash(...a) { this.calls.push(['setLineDash', a]); }, save() { this.calls.push(['save']); }, restore() { this.calls.push(['restore']); }, measureText(t) { this.calls.push(['measureText', t]); return { width: 30 }; }, fillRect(...a) { this.calls.push(['fillRect', a]); }, fillText(...a) { this.calls.push(['fillText', a]); }, set fillStyle(v) { this.fs = v; this.calls.push(['fillStyle', v]); }, get fillStyle() { return this.fs; }, set strokeStyle(v) { this.ss = v; this.calls.push(['strokeStyle', v]); }, get strokeStyle() { return this.ss; }, set lineWidth(v) { this.lw = v; }, get lineWidth() { return this.lw; }, set font(v) { this.fn = v; }, get font() { return this.fn; }, set textAlign(v) { this.ta = v; }, get textAlign() { return this.ta; }, set textBaseline(v) { this.tb = v; }, get textBaseline() { return this.tb; } };
 }
 
 describe('applyImageTransform', () => {
@@ -252,5 +254,99 @@ describe('drawUserMarker', () => {
     expect(screenY).toBeCloseTo(expectedY, 9);
     // The dot is drawn at unit screen scale, so its radius is zoom-independent.
     expect(Math.hypot(ctm[0], ctm[1])).toBeCloseTo(1, 9);
+  });
+});
+
+describe('drawGraticule', () => {
+  /** A linear georeference: image fractions map 1:1 to metres / 1000. */
+  function linearGeo() {
+    const m = [1000, 0, 0, 0, 1000, 0, 0, 0, 1];
+    return {
+      type: 'affine',
+      lon0: 0,
+      lat0: 0,
+      m,
+      extentTransform: { m },
+      geoToUV(lon, lat) {
+        return { u: lon * (111320 / 1000), v: 0.5 - lat * (111320 / 1000) };
+      },
+      isFolded() { return false; },
+    };
+  }
+
+  function gridFor(georef) {
+    // The builder is deterministic, so build once per georeference and reuse.
+    if (!cache.has(georef)) {
+      cache.set(georef, buildGraticule(georef, 800, 600));
+    }
+    return cache.get(georef);
+  }
+  const cache = new Map();
+
+  it('draws nothing without a grid', () => {
+    const ctx = fakeCtx();
+    drawGraticule(ctx, null, { scale: 1, rotation: 0 }, 800, 600, {});
+    expect(ctx.calls).toHaveLength(0);
+    drawGraticule(ctx, { lines: [] }, { scale: 1, rotation: 0 }, 800, 600, {});
+    expect(ctx.calls).toHaveLength(0);
+  });
+
+  it('clips to the image rectangle and restores the context', () => {
+    const ctx = fakeCtx();
+    const grid = gridFor(linearGeo());
+    drawGraticule(ctx, grid, { scale: 1, rotation: 0 }, 800, 600, {});
+    expect(ctx.calls[0]).toEqual(['save']);
+    expect(ctx.calls.some(c => c[0] === 'rect' && c[1][0] === 0 && c[1][1] === 0 && c[1][2] === 800 && c[1][3] === 600)).toBe(true);
+    expect(ctx.calls.some(c => c[0] === 'clip')).toBe(true);
+    expect(ctx.calls[ctx.calls.length - 1]).toEqual(['restore']);
+  });
+
+  it('strokes Bezier paths with a constant screen line width', () => {
+    const ctx = fakeCtx();
+    const grid = gridFor(linearGeo());
+    drawGraticule(ctx, grid, { scale: 2, rotation: 0 }, 800, 600, {});
+    expect(ctx.calls.some(c => c[0] === 'moveTo')).toBe(true);
+    expect(ctx.calls.some(c => c[0] === 'bezierCurveTo')).toBe(true);
+    expect(ctx.calls.some(c => c[0] === 'stroke')).toBe(true);
+    // lineWidth is divided by the map scale so the on-screen weight is constant.
+    expect(ctx.lw).toBeCloseTo(0.5, 9);
+  });
+
+  it('strokes only one level per axis', () => {
+    const ctx = fakeCtx();
+    const grid = gridFor(linearGeo());
+    drawGraticule(ctx, grid, { scale: 1, rotation: 0 }, 800, 600, {});
+    // Each stroked line is one beginPath + moveTo + stroke. At a coarse level
+    // the count is far below the number of generated lines.
+    const strokes = ctx.calls.filter(c => c[0] === 'stroke').length;
+    expect(strokes).toBeGreaterThan(0);
+    expect(strokes).toBeLessThan(grid.lines.length);
+  });
+
+  it('draws labels with a halo when enabled', () => {
+    const ctx = fakeCtx();
+    const grid = gridFor(linearGeo());
+    drawGraticule(ctx, grid, { scale: 1, rotation: 0 }, 800, 600, { labels: true });
+    const texts = ctx.calls.filter(c => c[0] === 'fillText');
+    expect(texts.length).toBeGreaterThan(0);
+    expect(ctx.calls.some(c => c[0] === 'strokeText')).toBe(true);
+    // Labels are counter-rotated and scale-cancelled like point labels.
+    expect(ctx.calls.some(c => c[0] === 'scale' && c[1][0] === 1)).toBe(true);
+    expect(ctx.calls.some(c => c[0] === 'rotate')).toBe(true);
+  });
+
+  it('omits labels by default', () => {
+    const ctx = fakeCtx();
+    const grid = gridFor(linearGeo());
+    drawGraticule(ctx, grid, { scale: 1, rotation: 0 }, 800, 600, {});
+    expect(ctx.calls.filter(c => c[0] === 'fillText')).toHaveLength(0);
+  });
+
+  it('falls back to a unit scale and no rotation for a bare transform', () => {
+    const ctx = fakeCtx();
+    const grid = gridFor(linearGeo());
+    drawGraticule(ctx, grid, undefined, 800, 600, {});
+    expect(ctx.calls.some(c => c[0] === 'stroke')).toBe(true);
+    expect(ctx.lw).toBeCloseTo(1, 9);
   });
 });

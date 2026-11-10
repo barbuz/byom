@@ -1,10 +1,18 @@
 import { geoToUV, geoDistanceToUV, imageDivisor } from './transforms.js';
+import { pickGridStepForScale, visibleLines } from './grid.js';
 
 // The user marker is a screen-space overlay: its radius is in CSS pixels and
 // must not grow with the map. The accuracy ring, however, is a ground distance
 // and does scale with the map.
 const USER_MARKER_RADIUS = 6;
 const USER_MARKER_INNER_RADIUS = 2;
+
+// Graticule styling. Widths are in CSS pixels and divided by the map scale so
+// the grid keeps a constant screen weight while zooming.
+const GRID_LINE_WIDTH = 1;
+const GRID_LABEL_FONT = '11px sans-serif';
+const GRID_LABEL_COLOR = 'rgba(255, 255, 255, 0.85)';
+const GRID_LABEL_HALO = 'rgba(0, 0, 0, 0.7)';
 
 // Scale the current transform about a fixed point, so a marker drawn afterwards
 // stays centered while its radius changes in screen space. Expressed as one
@@ -101,6 +109,83 @@ export function drawPendingPoint(ctx, pendingPoint, transform, imageWidth, image
   ctx.beginPath();
   ctx.arc(x, y,	 20,	0, Math.PI *	 2);
   ctx.stroke();
+}
+
+/**
+ * Draw the zoom-appropriate level of a precomputed graticule. The level is
+ * selected from `transform.scale` so on-screen spacing stays in a comfortable
+ * band; only that subset is stroked, and the line weight is divided by the
+ * scale so it stays constant on screen. Assumes the caller has already applied
+ * the image transform stack.
+ * @param {CanvasRenderingContext2D} ctx
+ * @param {Object|null} grid - From buildGraticule.
+ * @param {Object} transform - View transform {scale, ...}.
+ * @param {number} imageWidth
+ * @param {number} imageHeight
+ * @param {Object} [options]
+ * @param {boolean} [options.labels]
+ */
+export function drawGraticule(ctx, grid, transform, imageWidth, imageHeight, options = {}) {
+  if (!grid || !grid.lines || grid.lines.length === 0) return;
+  const { labels = false } = options;
+  const scale = Number.isFinite(transform?.scale) && transform.scale !== 0 ? transform.scale : 1;
+  const rotation = Number.isFinite(transform?.rotation) ? transform.rotation : 0;
+  const divisor = imageDivisor(imageWidth, imageHeight);
+  const { latStep, lonStep } = pickGridStepForScale(grid, { scale }, imageWidth);
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, 0, imageWidth, imageHeight);
+  ctx.clip();
+
+  ctx.lineWidth = GRID_LINE_WIDTH / scale;
+  ctx.strokeStyle = 'rgba(0, 0, 0, 0.35)';
+
+  const drawLevel = (kind, step) => {
+    for (const line of visibleLines(grid, step, kind)) {
+      const start = { x: line.start.u * divisor, y: line.start.v * divisor };
+      ctx.beginPath();
+      ctx.moveTo(start.x, start.y);
+      for (const segment of line.curves) {
+        ctx.bezierCurveTo(
+          segment.c1.u * divisor, segment.c1.v * divisor,
+          segment.c2.u * divisor, segment.c2.v * divisor,
+          segment.to.u * divisor, segment.to.v * divisor,
+        );
+      }
+      ctx.stroke();
+    }
+  };
+
+  drawLevel('lat', latStep);
+  drawLevel('lon', lonStep);
+
+  if (labels) {
+    ctx.font = GRID_LABEL_FONT;
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    const drawLabels = (kind, step) => {
+      for (const line of visibleLines(grid, step, kind)) {
+        const start = { x: line.start.u * divisor, y: line.start.v * divisor };
+        // Counter-rotate and cancel the scale so the text stays upright and
+        // readable at a constant size, like the reference-point labels.
+        ctx.save();
+        ctx.translate(start.x, start.y);
+        ctx.scale(1 / transform.scale, 1 / transform.scale);
+        ctx.rotate(-rotation);
+        ctx.lineWidth = 3;
+        ctx.strokeStyle = GRID_LABEL_HALO;
+        ctx.strokeText(line.label, 4, 0);
+        ctx.fillStyle = GRID_LABEL_COLOR;
+        ctx.fillText(line.label, 4, 0);
+        ctx.restore();
+      }
+    };
+    drawLabels('lat', latStep);
+    drawLabels('lon', lonStep);
+  }
+
+  ctx.restore();
 }
 
 export function drawUserMarker(ctx, position, geoTransform, transform, imageWidth, imageHeight) {
