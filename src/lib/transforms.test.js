@@ -8,6 +8,7 @@ import {
   createGeoreference,
   computeMLSWarp,
   computeLeastSquaresSimilarityTransform,
+  computeLeastSquaresAffineTransform,
   computeFoldState,
   geoDistanceToUV,
   imageDivisor,
@@ -826,6 +827,45 @@ function rotatedGrid(angle = ROTATED_THETA) {
   return points;
 }
 
+// An anisotropic affine map: the ground-to-image linear part is a rotation
+// followed by a NON-uniform scale (SX != SY). A similarity fits a single
+// uniform scale, so it cannot represent this map — the fixture is what
+// distinguishes the affine extent from the similarity one. This is the
+// stretched-scan / ski-panorama case.
+const ANISOTROPIC_THETA = (20 * Math.PI) / 180;
+const ANISOTROPIC_SX = 1e-4;
+const ANISOTROPIC_SY = 2.5e-4;
+function anisotropicPoint(east, north) {
+  const { lon, lat } = mlsToLonLat(east, north);
+  const c = Math.cos(ANISOTROPIC_THETA);
+  const s = Math.sin(ANISOTROPIC_THETA);
+  const rx = c * east - s * north;
+  const ry = s * east + c * north;
+  // Canonical frame q = diag(SX, SY) · R(θ) · p, stored y-down (v = -q_y).
+  return { u: 0.5 + ANISOTROPIC_SX * rx, v: 0.5 - ANISOTROPIC_SY * ry, lon, lat, accuracy: null };
+}
+function anisotropicGrid() {
+  const points = [];
+  for (let i = -2; i <= 2; i++) {
+    for (let j = -2; j <= 2; j++) {
+      points.push(anisotropicPoint(i * 2000, j * 2000));
+    }
+  }
+  return points;
+}
+// Ground-truth image->ground for the anisotropic fixture: invert
+// q = diag(SX, SY)·R(θ)·p, so p = R(−θ)·diag(1/SX, 1/SY)·q. The fixture stores
+// u = 0.5 + qx and v = 0.5 - qy, so qx = x - 0.5 and qy = y + 0.5 in the
+// canonical frame.
+function anisotropicGround(u, v) {
+  const { x, y } = imageFramePoint(u, v);
+  const rx = (x - 0.5) / ANISOTROPIC_SX;
+  const ry = (y + 0.5) / ANISOTROPIC_SY;
+  const c = Math.cos(ANISOTROPIC_THETA);
+  const s = Math.sin(ANISOTROPIC_THETA);
+  return { east: c * rx + s * ry, north: -s * rx + c * ry };
+}
+
 describe('computeLeastSquaresSimilarityTransform', () => {
   it('recovers the exact similarity from exactly-similarity correspondences', () => {
     const points = [
@@ -902,6 +942,83 @@ describe('computeLeastSquaresSimilarityTransform', () => {
     ];
     expect(() => computeLeastSquaresSimilarityTransform(points, MLS_LON0, MLS_LAT0))
       .toThrow('Reference points must be distinct');
+  });
+});
+
+describe('computeLeastSquaresAffineTransform', () => {
+  it('requires at least three points', () => {
+    expect(() => computeLeastSquaresAffineTransform([mlsPoint(0, 0), mlsPoint(1, 1)], MLS_LON0, MLS_LAT0))
+      .toThrow('Need at least 3 reference points');
+  });
+
+  it('rejects non-finite coordinates', () => {
+    const bad = [
+      { u: 0, v: 0, lon: NaN, lat: MLS_LAT0 },
+      { u: 1, v: 0, lon: MLS_LON0, lat: MLS_LAT0 },
+      { u: 0, v: 1, lon: MLS_LON0, lat: MLS_LAT0 },
+    ];
+    expect(() => computeLeastSquaresAffineTransform(bad, MLS_LON0, MLS_LAT0))
+      .toThrow('Reference points must have finite coordinates');
+  });
+
+  it('recovers an anisotropic affine map exactly', () => {
+    // A similarity cannot fit this map; the affine must be exact.
+    const points = anisotropicGrid();
+    const t = computeLeastSquaresAffineTransform(points, MLS_LON0, MLS_LAT0);
+    expect(t.type).toBe('affine');
+    expectMatrixShape(t);
+    for (const [u, v] of [[0, 0], [1, 0], [1, 1], [0, 1], [0.3, 0.7]]) {
+      const truth = anisotropicGround(u, v);
+      const { x, y } = imageFramePoint(u, v);
+      expect(t.m[0] * x + t.m[1] * y + t.m[2]).toBeCloseTo(truth.east, 4);
+      expect(t.m[3] * x + t.m[4] * y + t.m[5]).toBeCloseTo(truth.north, 4);
+    }
+  });
+
+  it('interpolates three correspondences exactly', () => {
+    // With exactly three points the least-squares affine is exactly determined,
+    // so it must pass through every control point (matching computeAffineTransform
+    // up to the metric origin, which each fitter chooses independently).
+    const points = [mlsPoint(-2000, -1000), mlsPoint(2000, -1000), mlsPoint(500, 1500)];
+    const t = computeLeastSquaresAffineTransform(points, MLS_LON0, MLS_LAT0);
+    for (const point of points) {
+      const geo = uvToGeo(point.u, point.v, t);
+      expect(geo.lon).toBeCloseTo(point.lon, 9);
+      expect(geo.lat).toBeCloseTo(point.lat, 9);
+    }
+  });
+
+  it('degrades to the similarity fit for a collinear control layout', () => {
+    // Collinear points leave the affine's extra DOF undetermined; the fitter
+    // must return the similarity rather than a wild matrix.
+    const collinear = [];
+    for (let i = 0; i < 5; i++) {
+      collinear.push(mlsPoint(i * 1000, i * 1000));
+    }
+    const t = computeLeastSquaresAffineTransform(collinear, MLS_LON0, MLS_LAT0);
+    const sim = computeLeastSquaresSimilarityTransform(collinear, MLS_LON0, MLS_LAT0);
+    expect(t.type).toBe('similarity');
+    for (let i = 0; i < 9; i++) {
+      expect(t.m[i]).toBeCloseTo(sim.m[i], 12);
+    }
+  });
+
+  it('degrades to the similarity for a near-collinear control layout', () => {
+    // A second point only 1 m off a 4 km line: the affine's second eigenvalue
+    // is ~1e-8 of its first, so the solve would amplify GPS noise by 8 digits.
+    const nearly = [mlsPoint(0, 0), mlsPoint(1000, 1000), mlsPoint(2000, 2000), mlsPoint(3000, 3000), mlsPoint(4000, 4001)];
+    const t = computeLeastSquaresAffineTransform(nearly, MLS_LON0, MLS_LAT0);
+    expect(t.type).toBe('similarity');
+    expect(t.m.every(Number.isFinite)).toBe(true);
+  });
+
+  it('keeps the affine fit for a tight but well-shaped cluster', () => {
+    // Conditioning is about shape, not size: a small square cluster is still a
+    // perfectly determined affine, so the fit stays affine.
+    const cluster = [mlsPoint(0, 0), mlsPoint(3, 1), mlsPoint(1, 3), mlsPoint(2, 2)];
+    const t = computeLeastSquaresAffineTransform(cluster, MLS_LON0, MLS_LAT0);
+    expect(t.type).toBe('affine');
+    expect(t.m.every(Number.isFinite)).toBe(true);
   });
 });
 
@@ -1103,15 +1220,32 @@ describe('createGeoreference', () => {
     expect(geoVia.lat).toBeCloseTo(geoDirect.lat, 12);
   });
 
-  it('uses a least-squares similarity extent for an MLS map', () => {
+  it('uses a least-squares affine extent for an MLS map', () => {
     const points = mlsGrid();
     const georef = createGeoreference(points);
     expect(georef.type).toBe('mls');
-    expect(georef.extentTransform.type).toBe('similarity');
+    expect(georef.extentTransform.type).toBe('affine');
     expect(georef.isFolded()).toBe(false);
     // Exact at a control point through the closure.
     const uv = georef.geoToUV(points[0].lon, points[0].lat);
     expect(uv.u).toBeCloseTo(points[0].u, 9);
+  });
+
+  it('projects the image corners to the true footprint of an anisotropic map', () => {
+    // The footprint is what the landing page classifies and badges against, so
+    // a similarity extent — which forces one uniform scale — bakes an
+    // anisotropic map's scale difference into the bounds. The affine extent
+    // must recover the true footprint where a similarity cannot.
+    const points = anisotropicGrid();
+    const georef = createGeoreference(points);
+    expect(georef.extentTransform.type).toBe('affine');
+    const { m } = georef.extentTransform;
+    for (const [u, v] of [[0, 0], [1, 0], [1, 1], [0, 1]]) {
+      const truth = anisotropicGround(u, v);
+      const { x, y } = imageFramePoint(u, v);
+      expect(m[0] * x + m[1] * y + m[2]).toBeCloseTo(truth.east, 4);
+      expect(m[3] * x + m[4] * y + m[5]).toBeCloseTo(truth.north, 4);
+    }
   });
 
   it('projects the image corners to the true footprint of a rotated map', () => {

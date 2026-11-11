@@ -561,10 +561,10 @@ function solve2x2(a, b, c, d, e, f) {
  *   s   = num / den
  *   t   = q̄ − s·p̄
  *
- * It is used as the MLS map's `extentTransform`: projecting the image
- * corners through a global similarity gives a plausible footprint where the
- * local warp would extrapolate badly. At least two points are required, which
- * is always true on the MLS path (5+).
+ * It seeds the MLS map's extent fallback: projecting the image corners through
+ * a global similarity gives a plausible footprint where the local warp would
+ * extrapolate badly, and it is what the affine extent fitter degrades to when
+ * the control points are near-degenerate. At least two points are required.
  * @param {Array} points - [{u, v, lon, lat}, ...]
  * @param {number} lon0 - Origin longitude of the metric plane
  * @param {number} lat0 - Origin latitude of the metric plane
@@ -655,6 +655,113 @@ export function computeLeastSquaresSimilarityTransform(points, lon0, lat0) {
 }
 
 /**
+ * Least-squares affine extent fit (image fractions -> local east/north metres).
+ *
+ * The full affine `q = A·p + t` (six parameters) is fitted by ordinary least
+ * squares, so it captures an anisotropic or sheared map that a similarity
+ * cannot: a similarity forces one uniform scale, baking any real x/y scale
+ * difference (a ski panorama, a stretched scan) straight into the footprint.
+ *
+ * Both planes are centred before the normal equations are formed. Solving on
+ * raw coordinates mixes metres (~1e3) with fractions (~1) and drives
+ * `cond(AᵀA)` to the float64 floor, so the centred 2x2 system is what keeps the
+ * fit well conditioned regardless of map size (the same reason the homography
+ * DLT Hartley-normalises). The linear part is recovered about the centroids and
+ * the translation re-expanded, so the result is an ordinary `{m, type, lon0,
+ * lat0}` matrix with `m[6] = m[7] = 0`.
+ *
+ * `extentTransform` for an MLS map is a *bounding* device, not the map model
+ * itself, so a near-degenerate control layout (near-collinear points, where the
+ * extra two degrees of freedom are poorly determined) falls back to the
+ * similarity fit rather than returning a wild footprint.
+ *
+ * @param {Array} points - [{u, v, lon, lat}, ...], at least 3
+ * @param {number} lon0 - Origin longitude of the metric plane
+ * @param {number} lat0 - Origin latitude of the metric plane
+ * @returns {Object} Transform {m, type: 'affine', lon0, lat0}
+ */
+export function computeLeastSquaresAffineTransform(points, lon0, lat0) {
+  if (points.length < 3) {
+    throw new Error('Need at least 3 reference points');
+  }
+  assertFinitePoints(points);
+
+  // Image (fraction) and ground (metric) points; the affine maps the former to
+  // the latter, matching the app's convention (`uvToGeo`).
+  const image = points.map(({ u, v }) => imageFramePoint(u, v));
+  const ground = points.map((point) =>
+    lonLatToLocalMeters(point.lon, point.lat, lon0, lat0)
+  );
+
+  let xBar = 0;
+  let yBar = 0;
+  let eastBar = 0;
+  let northBar = 0;
+  for (let i = 0; i < points.length; i++) {
+    xBar += image[i].x;
+    yBar += image[i].y;
+    eastBar += ground[i].east;
+    northBar += ground[i].north;
+  }
+  xBar /= points.length;
+  yBar /= points.length;
+  eastBar /= points.length;
+  northBar /= points.length;
+
+  // Centred normal equations for the 2x2 linear part: solve
+  //   [[Sxx, Sxy], [Sxy, Syy]] · l = [Sx·g, Sy·g]
+  // for each output (east, north) about the centroids.
+  let sxx = 0;
+  let sxy = 0;
+  let syy = 0;
+  let sxe = 0;
+  let sye = 0;
+  let sxn = 0;
+  let syn = 0;
+  for (let i = 0; i < points.length; i++) {
+    const dx = image[i].x - xBar;
+    const dy = image[i].y - yBar;
+    const de = ground[i].east - eastBar;
+    const dn = ground[i].north - northBar;
+    sxx += dx * dx;
+    sxy += dx * dy;
+    syy += dy * dy;
+    sxe += dx * de;
+    sye += dy * de;
+    sxn += dx * dn;
+    syn += dy * dn;
+  }
+
+  // Condition check: the control points must not be near-collinear. `det`
+  // scales as (spread)^4 while the entries scale as (spread)^2, so the ratio
+  // `det / trace²` is scale-free — it measures the *shape* of the point cloud
+  // (0 for collinear, 1/4 for isotropic), not its size, so it is the right test
+  // for a fixed-epsilon comparison. It is ~1/κ of the normal matrix, so a
+  // threshold of 1e-4 rejects only layouts whose second eigenvalue is under
+  // 1e-4 of the first, where the affine solve amplifies noise by 4+ digits.
+  const det = sxx * syy - sxy * sxy;
+  const traceSquared = (sxx + syy) * (sxx + syy);
+  if (!(det > 1e-4 * traceSquared)) {
+    return computeLeastSquaresSimilarityTransform(points, lon0, lat0);
+  }
+
+  // l_east and l_north are the rows of the linear part about the centroids.
+  const eastFromX = (syy * sxe - sxy * sye) / det;
+  const eastFromY = (sxx * sye - sxy * sxe) / det;
+  const northFromX = (syy * sxn - sxy * syn) / det;
+  const northFromY = (sxx * syn - sxy * sxn) / det;
+  const tx = eastBar - (eastFromX * xBar + eastFromY * yBar);
+  const ty = northBar - (northFromX * xBar + northFromY * yBar);
+
+  return {
+    m: [eastFromX, eastFromY, tx, northFromX, northFromY, ty, 0, 0, 1],
+    type: 'affine',
+    lon0,
+    lat0,
+  };
+}
+
+/**
  * Affine moving-least-squares warp (Schaefer, McPhail & Warren, 2006).
  *
  * Control points `p_i` (ground, local metres) map to `q_i` (image, canonical
@@ -701,10 +808,13 @@ export function computeMLSWarp(referencePoints, { lon0, lat0 } = {}) {
     Number.isFinite(point.accuracy) ? Math.abs(point.accuracy) : 0
   );
 
-  // The global similarity: its inverse seeds the iterative `uvToGeo`, and
-  // its forward map is the fallback where a local fit is singular. It is stable
-  // everywhere the local warp is not.
-  const extent = computeLeastSquaresSimilarityTransform(
+  // The global extent: its inverse seeds the iterative `uvToGeo`, and its
+  // forward map is the fallback where a local fit is singular. A global affine
+  // captures an anisotropic map (a stretched scan, a ski panorama) that a
+  // similarity cannot; the fitter itself degrades to a similarity when the
+  // control points are near-degenerate, so it is stable everywhere the local
+  // warp is not.
+  const extent = computeLeastSquaresAffineTransform(
     referencePoints, origin.lon0, origin.lat0
   );
 
@@ -942,8 +1052,9 @@ function createMatrixGeoreference(transform) {
  *   2 -> similarity, 3 -> affine, 4+ -> affine MLS
  *
  * `extentTransform` is the model itself for 2–3 points (preserving today's
- * footprint), and a least-squares similarity fit for MLS maps, so image
- * corners project to a plausible footprint rather than through the local warp.
+ * footprint), and a least-squares affine fit for MLS maps (degrading to a
+ * similarity for a near-degenerate control layout), so image corners project
+ * to a plausible footprint rather than through the local warp.
  * The fit is resolution-independent: reference points are stored as fractions
  * of `imageDivisor(W, H)`, so pixel dimensions are only needed by the callers
  * that convert to and from pixels (`mapMatch.js`, `MapViewer.svelte`).
@@ -964,7 +1075,7 @@ export function createGeoreference(referencePoints) {
     lon0: origin.lon0,
     lat0: origin.lat0,
   });
-  const extentTransform = computeLeastSquaresSimilarityTransform(
+  const extentTransform = computeLeastSquaresAffineTransform(
     referencePoints, origin.lon0, origin.lat0
   );
   const foldState = computeFoldState(
