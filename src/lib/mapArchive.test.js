@@ -3,6 +3,7 @@ import {
   ARCHIVE_FORMAT,
   ARCHIVE_FORMAT_VERSION,
   MAP_ENTRY_NAME,
+  NotByomError,
   buildMapArchive,
   crc32,
   isByomFile,
@@ -264,6 +265,23 @@ describe('buildMapArchive / readMapArchive', () => {
   it('rejects an archive with no map.json', async () => {
     const zip = zipStore([{ name: 'image.png', data: new Uint8Array([1]) }]);
     await expect(readMapArchive(new Blob([zip]))).rejects.toThrow(/missing map.json/i);
+  });
+
+  it('throws a NotByomError for an archive that is not a BYOM file', async () => {
+    // A valid ZIP that is simply not a BYOM archive (no map.json inside).
+    const zip = zipStore([{ name: 'holiday.txt', data: encoder.encode('hi') }]);
+    const error = await readMapArchive(new Blob([zip])).catch((e) => e);
+    expect(error).toBeInstanceOf(NotByomError);
+    expect(error.name).toBe('NotByomError');
+  });
+
+  it('does not flag a damaged BYOM archive as NotByomError', async () => {
+    // map.json exists but is corrupt: a broken BYOM file, not a different file
+    // type, so the caller keeps the generic failure path.
+    const zip = zipStore([{ name: MAP_ENTRY_NAME, data: encoder.encode('{ not json') }]);
+    const error = await readMapArchive(new Blob([zip])).catch((e) => e);
+    expect(error).toBeInstanceOf(Error);
+    expect(error).not.toBeInstanceOf(NotByomError);
   });
 
   it('rejects an archive whose map.json is not JSON', async () => {

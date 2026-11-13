@@ -3,7 +3,7 @@
   import { getAllMaps, getAllReferencePoints, addMap, importMap, deleteMap } from './lib/db.js';
   import { createPositionWatch } from './lib/geolocation.js';
   import { isPdfFile, loadPdf, renderPdfPageToBlob } from './lib/pdf.js';
-  import { isByomFile, readMapArchive } from './lib/mapArchive.js';
+  import { isByomFile, readMapArchive, NotByomError } from './lib/mapArchive.js';
   import { consumeLaunchedFiles } from './lib/fileLaunch.js';
   import PdfPagePicker from './components/PdfPagePicker.svelte';
   import {
@@ -209,7 +209,13 @@
       });
     } catch (error) {
       console.error('Error processing file:', error);
-      alert(`Failed to process ${file.name}`);
+      // A file that is not a BYOM archive at all (e.g. an ordinary `.zip`) gets
+      // a specific message; a genuine bug in the import path stays generic.
+      if (error instanceof NotByomError) {
+        alert(`${file.name} is not a BYOM map file. Choose a map image, a PDF, or a .byom file.`);
+      } else {
+        alert(`Failed to process ${file.name}`);
+      }
     }
   }
 
@@ -339,7 +345,10 @@
   // capture hint) only duplicates the platform's own choice. PDF is included
   // because a map is often a sheet, and on Android/Chromium a non-image type in
   // `accept` is also what restores the Camera entry that `image/*` alone hides.
-  // `.byom` and the zip types let a shared map be picked like any other file.
+  // `.byom` lets a shared map be picked like any other file; the generic zip
+  // types are deliberately absent, so the dialog does not offer every `.zip` on
+  // the device. A `.byom` whose extension was stripped still imports, because
+  // `isByomFile` also matches a zip MIME with ZIP magic bytes.
   function openFilePicker() {
     fileInput.click();
   }
@@ -359,7 +368,7 @@
     <input
       bind:this={fileInput}
       type="file"
-      accept="image/*,application/pdf,.byom,application/zip"
+      accept="image/*,application/pdf,.byom"
       onchange={handleFileSelect}
       style="display: none;"
     />

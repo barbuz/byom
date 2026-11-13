@@ -455,11 +455,15 @@ describe('MapList add map', () => {
     expect(screen.queryByRole('button', { name: /choose file/i })).toBeNull();
   });
 
-  it('offers .byom files in the picker', async () => {
+  it('offers .byom files in the picker but not generic zips', async () => {
     renderList();
     await screen.findByText('Downtown');
     const input = document.querySelector('input[type="file"]');
-    expect(input.getAttribute('accept')).toContain('.byom');
+    const accept = input.getAttribute('accept');
+    expect(accept).toContain('.byom');
+    // The dialog must not offer every .zip on the device; a stripped-extension
+    // archive still imports via isByomFile's zip-magic check.
+    expect(accept).not.toContain('application/zip');
   });
 });
 
@@ -529,7 +533,7 @@ describe('MapList .byom imports', () => {
     expect(alertSpy).toHaveBeenCalledWith(expect.stringMatching(/newer version/i));
   });
 
-  it('alerts and stores nothing when a .byom file is invalid', async () => {
+  it('gives a specific message when a file is not a BYOM archive', async () => {
     const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
     dbMocks.getAllMaps.mockResolvedValue([]);
@@ -540,9 +544,51 @@ describe('MapList .byom imports', () => {
     const bogus = new File([new Uint8Array([1, 2, 3, 4])], 'broken.byom');
     selectFiles([bogus]);
 
-    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringMatching(/Failed to process broken.byom/)));
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/broken\.byom is not a BYOM map file/),
+    ));
     expect(dbMocks.importMap).not.toHaveBeenCalled();
     expect(dbMocks.addMap).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('explains that an ordinary .zip is not a BYOM map', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    // A valid ZIP that simply is not a BYOM archive (no map.json inside).
+    const zip = zipStore([{ name: 'holiday.txt', data: new TextEncoder().encode('hi') }]);
+    selectFiles([new File([zip], 'holiday-photos.zip', { type: 'application/zip' })]);
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/holiday-photos\.zip is not a BYOM map file/),
+    ));
+    expect(dbMocks.importMap).not.toHaveBeenCalled();
+    expect(dbMocks.addMap).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('keeps the generic message for a damaged BYOM archive', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    // map.json is present but corrupt: a broken BYOM file, not a wrong file
+    // type, so the message stays generic rather than claiming it is not BYOM.
+    const zip = zipStore([{ name: 'map.json', data: new TextEncoder().encode('{ not json') }]);
+    selectFiles([new File([zip], 'damaged.byom', { type: 'application/zip' })]);
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(
+      expect.stringMatching(/Failed to process damaged\.byom/),
+    ));
+    expect(dbMocks.importMap).not.toHaveBeenCalled();
     errorSpy.mockRestore();
   });
 

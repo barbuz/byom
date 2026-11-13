@@ -33,6 +33,18 @@ const MAX_ENTRIES = 32;
 const MAX_TOTAL_UNCOMPRESSED_BYTES = 256 * 1024 * 1024;
 const MAX_REFERENCE_POINTS = 10000;
 
+// Thrown when a file is not a BYOM archive at all (a random ZIP, a wrong file
+// type) as opposed to a BYOM archive that is damaged. `MapList` turns this into
+// a specific "this isn't a BYOM file" message rather than a generic failure.
+export class NotByomError extends Error {
+  constructor(message) {
+    super(message);
+    this.name = 'NotByomError';
+  }
+}
+
+const notByom = (message) => new NotByomError(message);
+
 const MIME_EXTENSIONS = {
   'image/png': '.png',
   'image/jpeg': '.jpg',
@@ -227,7 +239,7 @@ function assertSafeEntryName(name) {
 export async function unzip(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const eocd = findEndOfCentralDirectory(view, bytes.byteLength);
-  if (eocd < 0) throw new Error('Not a BYOM archive: not a ZIP file');
+  if (eocd < 0) throw notByom('Not a BYOM archive: not a ZIP file');
 
   const entryCount = view.getUint16(eocd + 10, true);
   const centralOffset = view.getUint32(eocd + 16, true);
@@ -478,7 +490,7 @@ export async function readMapArchive(blob) {
 
   const documentBytes = entries.get(MAP_ENTRY_NAME);
   if (!documentBytes) {
-    throw new Error(`Not a BYOM archive: missing ${MAP_ENTRY_NAME}`);
+    throw notByom(`Not a BYOM archive: missing ${MAP_ENTRY_NAME}`);
   }
 
   let parsed;
