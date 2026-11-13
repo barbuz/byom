@@ -4,6 +4,7 @@
   import { screenToImage, getPointAtScreen, pinchZoomTransform, centerOnImagePoint } from './lib/viewport.js';
   import { buildGraticule } from './lib/grid.js';
   import { drawGraticule } from './lib/draw.js';
+  import { buildMapArchive, suggestedArchiveName, ARCHIVE_MIME } from './lib/mapArchive.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import './styles/MapViewer.css';
 
@@ -59,6 +60,7 @@
   let hoverPointIndex = $state(-1);
   let showingDebug = $state(false);
   let showingGrid = $state(false);
+  let sharing = $state(false);
   let pendingReferencePoint = $state(null);
   let showingCoordinateSelection = $state(false);
   let coordinateMethod = $state(null);
@@ -532,6 +534,49 @@
     window.location.hash = '';
   }
 
+  // Export the map as a shareable `.byom` archive. Prefer the native share
+  // sheet (works on Android and iOS); fall back to a download link on desktop
+  // browsers that cannot share files.
+  async function shareMap() {
+    if (!map || sharing) return;
+    sharing = true;
+    try {
+      const archive = await buildMapArchive({ map, referencePoints, imageBlob: map.imageBlob });
+      const file = new File([archive], suggestedArchiveName(map.name), { type: ARCHIVE_MIME });
+
+      if (navigator.canShare?.({ files: [file] })) {
+        try {
+          await navigator.share({ files: [file], title: map.name });
+          return;
+        } catch (error) {
+          // A user who cancels the sheet is not an error worth reporting; only
+          // a genuine failure falls through to the download.
+          if (error?.name === 'AbortError') return;
+        }
+      }
+
+      downloadBlob(archive, file.name);
+    } catch (error) {
+      console.error('Error sharing map:', error);
+      alert('Failed to share map');
+    } finally {
+      sharing = false;
+    }
+  }
+
+  function downloadBlob(blob, filename) {
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
+    // Revoke on a later tick: revoking synchronously can cancel the download in
+    // some browsers before it has started.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
   function centerOnUser() {
     const position = userPositionMarker?.userPosition;
     if (!position || !geoTransform) return;
@@ -946,6 +991,14 @@
       onclick={toggleGrid}
     >
       🌐 Grid
+    </button>
+
+    <button
+      class="control-btn share-btn"
+      onclick={shareMap}
+      disabled={sharing}
+    >
+      📤 Share
     </button>
   </div>
 

@@ -13,6 +13,7 @@ A Progressive Web App for georeferencing map photos and viewing your GPS locatio
 - ⚡ **No server required** - completely serverless PWA
 - 🎯 **High accuracy** - similarity, affine or moving-least-squares transform by point count
 - 🌐 **Optional coordinate grid** - overlay a real lat/lon graticule that refines as you zoom in
+- 📤 **Share a map as one file** - export a map and its reference points as a single `.byom` file to send to another BYOM user
 
 ## 🚀 Quick Start
 
@@ -57,6 +58,11 @@ The **Grid** button overlays a real latitude/longitude graticule on the map. Lin
 
 On the landing page, maps are grouped into three sections: **Maps here** (maps whose footprint contains your current location), **Incomplete** (fewer than two points, so not yet georeferenced), and **Other maps**. Each section is labelled **Sort by** and offers distance, map size, last modified and name, with an ascending/descending toggle. Options that cannot work for a section's maps are disabled: size and distance need a georeferenced footprint, so they are greyed out in **Incomplete**. The distance on a card is always measured to the map's centre ("… from map centre") — the same distance the "Distance" sort uses, so a card's badge and its position always agree — and it is shown on every georeferenced card rather than as a containment claim. The page updates as you move.
 
+### 4. Share a Map
+The **Share** button in the viewer exports the map as a single `.byom` file: the original image plus every reference point. On a phone this opens the native share sheet, so the file can go straight to a messaging app or nearby device; on a desktop browser it downloads instead. The file is a plain ZIP holding the image and a `map.json`, and it never stores the fitted transform — that is recomputed from the reference points on import, so a map always reopens with the current georeferencing.
+
+To import one, add it like any other map (camera or files); BYOM recognises the `.byom` file and stores the map and its points in one step. On Android, an **installed** BYOM also registers as a handler for `.byom` files, so opening a shared file from a messaging or files app launches BYOM and imports it directly (this file-association path is Chromium/Android only; iOS and Firefox use the file picker). A file written by a newer BYOM still imports on a best-effort basis, with a warning.
+
 ## 🔬 Transform Methods
 
 The app uses different mathematical transformations based on the number of reference points. The first two share the same representation - a 3x3 homogeneous matrix mapping image pixels to local east/north metres, plus the metric plane's origin - and are fitted in that metric plane rather than raw degrees, so they stay accurate at any latitude and map rotation. A single `Georeference` object (built by `createGeoreference`) exposes `geoToUV`/`uvToGeo` plus a footprint extent and a fold check, so every consumer holds one shape whether the map is projective or not.
@@ -83,6 +89,7 @@ byom/
 │   └── lib/
 │       ├── db.js                     # IndexedDB wrapper
 │       ├── transforms.js             # Transform algorithms
+│       ├── mapArchive.js             # `.byom` share format (ZIP read/write)
 │       ├── mapMatch.js               # Landing-page containment/classification
 │       └── geolocation.js            # Shared GPS watch
 ├── public/
@@ -112,6 +119,7 @@ byom/
 - **Desktop**: Chrome, Edge, Firefox, Safari (latest versions)
 - **Mobile**: iOS Safari 13+, Chrome Android 80+
 - **Required**: IndexedDB, Geolocation API, Canvas, Touch Events
+- **Sharing maps**: the native share sheet needs the Web Share API with file support (Android Chrome, iOS Safari); other browsers download the `.byom` file instead. Reading a `.byom` works everywhere, and on Android an installed BYOM can open `.byom` files directly (File Handling API, Chrome 102+).
 
 ## 🐛 Known GPS issues
 

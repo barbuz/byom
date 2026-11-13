@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/svelte';
 import { flushPromises, FakeImage } from '../tests/setup.js';
+import { buildMapArchive, zipStore } from './lib/mapArchive.js';
 import MapList from './MapList.svelte';
 
 const OriginalImage = globalThis.Image;
@@ -9,6 +10,7 @@ const dbMocks = vi.hoisted(() => ({
   getAllMaps: vi.fn(),
   getAllReferencePoints: vi.fn(),
   addMap: vi.fn(async () => 1),
+  importMap: vi.fn(async () => 1),
   deleteMap: vi.fn(async () => {}),
 }));
 
@@ -47,6 +49,7 @@ const maps = [
 
 afterEach(() => {
   window.location.hash = '';
+  delete window.launchQueue;
   vi.clearAllMocks();
   vi.restoreAllMocks();
   // clearAllMocks keeps mock implementations but not a plain `mockReturnValue`;
@@ -450,5 +453,114 @@ describe('MapList add map', () => {
     expect(inputSpy).toHaveBeenCalledTimes(1);
     expect(screen.queryByRole('button', { name: /take photo/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /choose file/i })).toBeNull();
+  });
+
+  it('offers .byom files in the picker', async () => {
+    renderList();
+    await screen.findByText('Downtown');
+    const input = document.querySelector('input[type="file"]');
+    expect(input.getAttribute('accept')).toContain('.byom');
+  });
+});
+
+describe('MapList .byom imports', () => {
+  function selectFiles(files) {
+    const input = document.querySelector('input[type="file"]');
+    Object.defineProperty(input, 'files', { value: files, configurable: true });
+    fireEvent.change(input);
+    return input;
+  }
+
+  async function archiveFile(name = 'shared.byom') {
+    const blob = await buildMapArchive({
+      map: { name: 'Shared map', imageWidth: 800, imageHeight: 600, timestamp: 1700000000000 },
+      referencePoints: [
+        { u: 0.1, v: 0.2, lon: 8.0, lat: 47.0, accuracy: 5 },
+        { u: 0.3, v: 0.4, lon: 8.01, lat: 46.99, accuracy: null },
+      ],
+      imageBlob: new Blob([new Uint8Array([137, 80, 78, 71])], { type: 'image/png' }),
+    });
+    return new File([blob], name, { type: 'application/zip' });
+  }
+
+  it('imports a shared archive with its reference points', async () => {
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    globalThis.Image = FakeImage;
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    selectFiles([await archiveFile()]);
+
+    await waitFor(() => expect(dbMocks.importMap).toHaveBeenCalled());
+    const [mapData, points] = dbMocks.importMap.mock.calls[0];
+    expect(mapData.name).toBe('Shared map');
+    expect(mapData.imageWidth).toBe(800);
+    expect(mapData.timestamp).toBe(1700000000000);
+    expect(points).toHaveLength(2);
+    expect(points[0].lon).toBe(8.0);
+    expect(dbMocks.addMap).not.toHaveBeenCalled();
+  });
+
+  it('warns but still imports an archive from a newer format version', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    globalThis.Image = FakeImage;
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    // A newer-version archive still parses; the picker imports it best-effort.
+    const doc = {
+      format: 'byom-map',
+      formatVersion: 99,
+      map: { name: 'From the future', imageFile: 'image.png', imageMime: 'image/png', imageWidth: 800, imageHeight: 600 },
+      referencePoints: [{ u: 0.1, v: 0.2, lon: 8.0, lat: 47.0 }],
+    };
+    const zip = zipStore([
+      { name: 'map.json', data: new TextEncoder().encode(JSON.stringify(doc)) },
+      { name: 'image.png', data: new Uint8Array([137, 80, 78, 71]) },
+    ]);
+    const newer = new File([zip], 'newer.byom', { type: 'application/zip' });
+
+    selectFiles([newer]);
+
+    await waitFor(() => expect(dbMocks.importMap).toHaveBeenCalled());
+    expect(alertSpy).toHaveBeenCalledWith(expect.stringMatching(/newer version/i));
+  });
+
+  it('alerts and stores nothing when a .byom file is invalid', async () => {
+    const alertSpy = vi.spyOn(window, 'alert').mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    const bogus = new File([new Uint8Array([1, 2, 3, 4])], 'broken.byom');
+    selectFiles([bogus]);
+
+    await waitFor(() => expect(alertSpy).toHaveBeenCalledWith(expect.stringMatching(/Failed to process broken.byom/)));
+    expect(dbMocks.importMap).not.toHaveBeenCalled();
+    expect(dbMocks.addMap).not.toHaveBeenCalled();
+    errorSpy.mockRestore();
+  });
+
+  it('imports a .byom file the app was launched with', async () => {
+    let consumer;
+    window.launchQueue = { setConsumer: (fn) => { consumer = fn; } };
+    dbMocks.getAllMaps.mockResolvedValue([]);
+    dbMocks.getAllReferencePoints.mockResolvedValue([]);
+    globalThis.Image = FakeImage;
+    render(MapList);
+    await screen.findByText(/no maps yet/i);
+
+    const file = await archiveFile();
+    await consumer({ files: [{ getFile: async () => file }] });
+
+    await waitFor(() => expect(dbMocks.importMap).toHaveBeenCalled());
+    expect(dbMocks.importMap.mock.calls[0][0].name).toBe('Shared map');
+
+    delete window.launchQueue;
   });
 });
