@@ -61,7 +61,7 @@ On the landing page, maps are grouped into three sections: **Maps here** (maps w
 ### 4. Share a Map
 The **Share** button in the viewer exports the map as a single `.byom` file: the original image plus every reference point. On a phone this opens the native share sheet, so the file can go straight to a messaging app or nearby device; on a desktop browser it downloads instead. The file is a plain ZIP holding the image and a `map.json`, and it never stores the fitted transform — that is recomputed from the reference points on import, so a map always reopens with the current georeferencing.
 
-To import one, add it like any other map (camera or files); BYOM recognises the `.byom` file and stores the map and its points in one step. On Android, an **installed** BYOM also registers as a handler for `.byom` files, so opening a shared file from a messaging or files app launches BYOM and imports it directly (this file-association path is Chromium/Android only; iOS and Firefox use the file picker). A file written by a newer BYOM still imports on a best-effort basis, with a warning.
+To import one, add it like any other map (camera or files); BYOM recognises the `.byom` file and stores the map and its points in one step. On desktop ChromeOS/macOS/Windows/Linux, an **installed** BYOM also registers as a handler for `.byom` files, so opening one from the file manager launches BYOM and imports it directly (the File Handling API; it is desktop-only, so this does not apply on Android or iOS, which use the file picker). A file written by a newer BYOM still imports on a best-effort basis, with a warning.
 
 ## 🔬 Transform Methods
 
@@ -119,7 +119,7 @@ byom/
 - **Desktop**: Chrome, Edge, Firefox, Safari (latest versions)
 - **Mobile**: iOS Safari 13+, Chrome Android 80+
 - **Required**: IndexedDB, Geolocation API, Canvas, Touch Events
-- **Sharing maps**: the native share sheet needs the Web Share API with file support (Android Chrome, iOS Safari); other browsers download the `.byom` file instead. Reading a `.byom` works everywhere, and on Android an installed BYOM can open `.byom` files directly (File Handling API, Chrome 102+).
+- **Sharing maps**: the native share sheet needs the Web Share API with file support (Android Chrome, iOS Safari); other browsers download the `.byom` file instead. Reading a `.byom` works everywhere. On desktop Chrome/Edge (ChromeOS, macOS, Windows, Linux) an installed BYOM can also open `.byom` files directly via the File Handling API; that API is desktop-only, so on Android and iOS the file picker is the only import path.
 
 ## 🐛 Known GPS issues
 

@@ -1,8 +1,10 @@
 // File Handling API glue: when an *installed* BYOM is registered as the handler
 // for `.byom` files (see `file_handlers` in public/manifest.json), the OS
 // launches the app with the file and the browser delivers it through
-// `window.launchQueue`. This is Chromium/Android only (Chrome 102+); on iOS and
-// Firefox `launchQueue` is absent and the app falls back to the file input.
+// `window.launchQueue`. This is Chromium-only and, per Chrome's own docs,
+// limited to desktop operating systems (ChromeOS, macOS, Windows, Linux); it
+// does NOT work on Android. Where `launchQueue` is absent (Android, iOS,
+// Firefox) the app falls back to the file input.
 //
 // The launch params are buffered until a consumer is set, so registering the
 // consumer on mount still catches the launch that opened the app.
