@@ -7,11 +7,18 @@
 // recomputed on import. That keeps the file small and means a change to the
 // similarity/affine/MLS ladder never invalidates an existing export.
 //
-// The writer is store-only (no compression): the image is already compressed
-// and the JSON is tiny, so deflating would cost CPU on a phone for no gain. The
-// reader accepts both STORE and DEFLATE, so an archive hand-built with a desktop
-// zip tool still imports.
+// The ZIP container itself is fflate's (no hand-rolled byte parsing). We write
+// store-only (the image is already compressed and the JSON is tiny, so
+// deflating would cost CPU on a phone for no gain) but read STORE and DEFLATE
+// alike, so an archive hand-built with a desktop zip tool still imports.
+//
+// fflate verifies neither an entry's CRC-32 nor its name, and inflates before
+// checking anything, so `unzip` keeps that policy: it reads the declared CRCs,
+// sizes and methods from the central directory and rejects an oversized or
+// unsupported archive *before* inflating, then verifies each entry's name,
+// size and CRC-32 afterwards.
 
+import { unzipSync, zipSync } from 'fflate';
 import { wrapLongitude } from './transforms.js';
 
 export const ARCHIVE_FORMAT = 'byom-map';
@@ -21,12 +28,12 @@ export const ARCHIVE_MIME = 'application/zip';
 export const MAP_ENTRY_NAME = 'map.json';
 
 // A `.byom` is a real ZIP; every local file header starts with this signature.
+const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];
 const ZIP_LOCAL_SIGNATURE = 0x04034b50;
 const ZIP_CENTRAL_SIGNATURE = 0x02014b50;
 const ZIP_EOCD_SIGNATURE = 0x06054b50;
 const ZIP_METHOD_STORE = 0;
 const ZIP_METHOD_DEFLATE = 8;
-const ZIP_MAGIC = [0x50, 0x4b, 0x03, 0x04];
 
 // Bounds that keep a hostile or corrupt file from exhausting memory.
 const MAX_ENTRIES = 32;
@@ -86,141 +93,11 @@ export function crc32(bytes) {
   return (crc ^ 0xffffffff) >>> 0;
 }
 
-// ------------------------------------------------------------ byte helpers
+// ------------------------------------------------------- ZIP container
 
-function concatChunks(chunks) {
-  let total = 0;
-  for (const chunk of chunks) total += chunk.length;
-  const out = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    out.set(chunk, offset);
-    offset += chunk.length;
-  }
-  return out;
-}
-
-function bytesToStream(bytes) {
-  // jsdom has no `Blob.stream()`, so the stream is built explicitly.
-  return new ReadableStream({
-    start(controller) {
-      controller.enqueue(bytes);
-      controller.close();
-    },
-  });
-}
-
-async function streamToBytes(readable) {
-  const reader = readable.getReader();
-  const chunks = [];
-  let total = 0;
-  for (;;) {
-    const { done, value } = await reader.read();
-    if (done) break;
-    chunks.push(value);
-    total += value.length;
-  }
-  return concatChunks(chunks);
-}
-
-async function inflateRaw(bytes) {
-  const stream = bytesToStream(bytes).pipeThrough(new DecompressionStream('deflate-raw'));
-  return streamToBytes(stream);
-}
-
-function dosDateTime(date) {
-  const year = Math.max(1980, date.getFullYear());
-  const time = (date.getHours() << 11) | (date.getMinutes() << 5) | (date.getSeconds() >> 1);
-  const day = (year - 1980) << 9 | ((date.getMonth() + 1) << 5) | date.getDate();
-  return { time: time & 0xffff, date: day & 0xffff };
-}
-
-// ------------------------------------------------------------ ZIP writing
-
-/**
- * Build a store-only ZIP from `{ name, data }` entries.
- * @param {Array<{name: string, data: Uint8Array}>} entries
- * @returns {Uint8Array}
- */
-export function zipStore(entries) {
-  const encoder = new TextEncoder();
-  const { time, date } = dosDateTime(new Date());
-  const localChunks = [];
-  const centralChunks = [];
-  let offset = 0;
-
-  for (const entry of entries) {
-    const nameBytes = encoder.encode(entry.name);
-    const data = entry.data;
-    const crc = crc32(data);
-
-    const local = new Uint8Array(30 + nameBytes.length);
-    const lv = new DataView(local.buffer);
-    lv.setUint32(0, ZIP_LOCAL_SIGNATURE, true);
-    lv.setUint16(4, 20, true);
-    lv.setUint16(6, 0, true);
-    lv.setUint16(8, ZIP_METHOD_STORE, true);
-    lv.setUint16(10, time, true);
-    lv.setUint16(12, date, true);
-    lv.setUint32(14, crc, true);
-    lv.setUint32(18, data.length, true);
-    lv.setUint32(22, data.length, true);
-    lv.setUint16(26, nameBytes.length, true);
-    lv.setUint16(28, 0, true);
-    local.set(nameBytes, 30);
-
-    const central = new Uint8Array(46 + nameBytes.length);
-    const cv = new DataView(central.buffer);
-    cv.setUint32(0, ZIP_CENTRAL_SIGNATURE, true);
-    cv.setUint16(4, 20, true);
-    cv.setUint16(6, 20, true);
-    cv.setUint16(8, 0, true);
-    cv.setUint16(10, ZIP_METHOD_STORE, true);
-    cv.setUint16(12, time, true);
-    cv.setUint16(14, date, true);
-    cv.setUint32(16, crc, true);
-    cv.setUint32(20, data.length, true);
-    cv.setUint32(24, data.length, true);
-    cv.setUint16(28, nameBytes.length, true);
-    cv.setUint16(30, 0, true);
-    cv.setUint16(32, 0, true);
-    cv.setUint16(34, 0, true);
-    cv.setUint16(36, 0, true);
-    cv.setUint32(38, 0, true);
-    cv.setUint32(42, offset, true);
-    central.set(nameBytes, 46);
-
-    localChunks.push(local, data);
-    centralChunks.push(central);
-    offset += local.length + data.length;
-  }
-
-  const centralSize = centralChunks.reduce((sum, chunk) => sum + chunk.length, 0);
-
-  const eocd = new Uint8Array(22);
-  const ev = new DataView(eocd.buffer);
-  ev.setUint32(0, ZIP_EOCD_SIGNATURE, true);
-  ev.setUint16(4, 0, true);
-  ev.setUint16(6, 0, true);
-  ev.setUint16(8, entries.length, true);
-  ev.setUint16(10, entries.length, true);
-  ev.setUint32(12, centralSize, true);
-  ev.setUint32(16, offset, true);
-  ev.setUint16(20, 0, true);
-
-  return concatChunks([...localChunks, ...centralChunks, eocd]);
-}
-
-// ------------------------------------------------------------ ZIP reading
-
-function findEndOfCentralDirectory(view, byteLength) {
-  const maxComment = 0xffff;
-  const earliest = Math.max(0, byteLength - 22 - maxComment);
-  for (let i = byteLength - 22; i >= earliest; i -= 1) {
-    if (view.getUint32(i, true) === ZIP_EOCD_SIGNATURE) return i;
-  }
-  return -1;
-}
+// The container is fflate's; the policy around it is ours. fflate verifies
+// neither an entry's CRC-32 nor its name, and it will inflate a bomb, so the
+// checks below are not redundant.
 
 function assertSafeEntryName(name) {
   const normalized = name.replace(/\\/g, '/');
@@ -230,74 +107,94 @@ function assertSafeEntryName(name) {
 }
 
 /**
- * Read a ZIP (STORE or DEFLATE entries) into a name -> bytes map.
- * The central directory is authoritative; each entry's CRC-32 and declared
- * size are verified so truncation and corruption are caught.
+ * The metadata each entry declares, read from the central directory. fflate
+ * does not expose any of it, and it inflates before checking anything, so the
+ * declared sizes and methods are read here to reject a decompression bomb
+ * *before* handing the bytes to fflate.
  * @param {Uint8Array} bytes
- * @returns {Promise<Map<string, Uint8Array>>}
+ * @returns {Map<string, {crc: number, size: number}>}
  */
-export async function unzip(bytes) {
+function declaredEntries(bytes) {
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
-  const eocd = findEndOfCentralDirectory(view, bytes.byteLength);
+  const maxComment = 0xffff;
+  const earliest = Math.max(0, bytes.byteLength - 22 - maxComment);
+  let eocd = -1;
+  for (let i = bytes.byteLength - 22; i >= earliest; i -= 1) {
+    if (view.getUint32(i, true) === ZIP_EOCD_SIGNATURE) { eocd = i; break; }
+  }
   if (eocd < 0) throw notByom('Not a BYOM archive: not a ZIP file');
 
   const entryCount = view.getUint16(eocd + 10, true);
-  const centralOffset = view.getUint32(eocd + 16, true);
   if (entryCount > MAX_ENTRIES) {
     throw new Error(`Invalid BYOM archive: too many entries (${entryCount})`);
   }
 
   const decoder = new TextDecoder();
   const entries = new Map();
-  let cursor = centralOffset;
-  let totalUncompressed = 0;
-
+  let totalDeclared = 0;
+  let cursor = view.getUint32(eocd + 16, true);
   for (let i = 0; i < entryCount; i += 1) {
     if (view.getUint32(cursor, true) !== ZIP_CENTRAL_SIGNATURE) {
       throw new Error('Invalid BYOM archive: corrupt central directory');
     }
     const method = view.getUint16(cursor + 10, true);
-    const expectedCrc = view.getUint32(cursor + 16, true);
-    const compressedSize = view.getUint32(cursor + 20, true);
-    const uncompressedSize = view.getUint32(cursor + 24, true);
+    if (method !== ZIP_METHOD_STORE && method !== ZIP_METHOD_DEFLATE) {
+      throw new Error(`Invalid BYOM archive: unsupported compression method ${method}`);
+    }
+    const crc = view.getUint32(cursor + 16, true);
+    const size = view.getUint32(cursor + 24, true);
     const nameLength = view.getUint16(cursor + 28, true);
     const extraLength = view.getUint16(cursor + 30, true);
     const commentLength = view.getUint16(cursor + 32, true);
     const localOffset = view.getUint32(cursor + 42, true);
     const name = decoder.decode(bytes.subarray(cursor + 46, cursor + 46 + nameLength));
-    assertSafeEntryName(name);
-
-    totalUncompressed += uncompressedSize;
-    if (totalUncompressed > MAX_TOTAL_UNCOMPRESSED_BYTES) {
-      throw new Error('Invalid BYOM archive: uncompressed size is too large');
-    }
 
     if (view.getUint32(localOffset, true) !== ZIP_LOCAL_SIGNATURE) {
       throw new Error('Invalid BYOM archive: corrupt local header');
     }
-    const localNameLength = view.getUint16(localOffset + 26, true);
-    const localExtraLength = view.getUint16(localOffset + 28, true);
-    const dataStart = localOffset + 30 + localNameLength + localExtraLength;
-    const compressed = bytes.subarray(dataStart, dataStart + compressedSize);
 
-    let data;
-    if (method === ZIP_METHOD_STORE) {
-      data = compressed;
-    } else if (method === ZIP_METHOD_DEFLATE) {
-      data = await inflateRaw(compressed);
-    } else {
-      throw new Error(`Invalid BYOM archive: unsupported compression method ${method}`);
+    totalDeclared += size;
+    if (totalDeclared > MAX_TOTAL_UNCOMPRESSED_BYTES) {
+      throw new Error('Invalid BYOM archive: uncompressed size is too large');
     }
+    entries.set(name, { crc, size });
+    cursor += 46 + nameLength + extraLength + commentLength;
+  }
+  return entries;
+}
 
-    if (data.length !== uncompressedSize) {
+/**
+ * Read a ZIP (STORE or DEFLATE entries) into a name -> bytes map. fflate does
+ * the inflating; this verifies each entry's name, declared size and CRC-32, so
+ * truncation and corruption are still caught.
+ * @param {Uint8Array} bytes
+ * @returns {Map<string, Uint8Array>}
+ */
+export function unzip(bytes) {
+  const declared = declaredEntries(bytes);
+
+  let raw;
+  try {
+    raw = unzipSync(bytes);
+  } catch {
+    throw new Error('Invalid BYOM archive: could not decompress its contents');
+  }
+
+  const entries = new Map();
+  for (const [name, data] of Object.entries(raw)) {
+    assertSafeEntryName(name);
+
+    // fflate enumerates entries from the central directory, so every name it
+    // returns was recorded above.
+    const entry = declared.get(name);
+    if (data.length !== entry.size) {
       throw new Error(`Invalid BYOM archive: "${name}" is truncated`);
     }
-    if (crc32(data) !== expectedCrc) {
+    if (crc32(data) !== entry.crc) {
       throw new Error(`Invalid BYOM archive: "${name}" failed its checksum`);
     }
 
     entries.set(name, data);
-    cursor += 46 + nameLength + extraLength + commentLength;
   }
 
   return entries;
@@ -469,10 +366,10 @@ export async function buildMapArchive({ map, referencePoints = [], imageBlob }) 
 
   const imageBytes = new Uint8Array(await imageBlob.arrayBuffer());
   const jsonBytes = new TextEncoder().encode(JSON.stringify(document, null, 2));
-  const zip = zipStore([
-    { name: MAP_ENTRY_NAME, data: jsonBytes },
-    { name: imageFile, data: imageBytes },
-  ]);
+  const zip = zipSync(
+    { [MAP_ENTRY_NAME]: jsonBytes, [imageFile]: imageBytes },
+    { level: 0 },
+  );
 
   return new Blob([zip], { type: ARCHIVE_MIME });
 }
@@ -486,7 +383,7 @@ export async function buildMapArchive({ map, referencePoints = [], imageBlob }) 
  */
 export async function readMapArchive(blob) {
   const bytes = new Uint8Array(await blob.arrayBuffer());
-  const entries = await unzip(bytes);
+  const entries = unzip(bytes);
 
   const documentBytes = entries.get(MAP_ENTRY_NAME);
   if (!documentBytes) {

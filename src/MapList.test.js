@@ -1,10 +1,18 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, fireEvent, screen, waitFor } from '@testing-library/svelte';
+import { zipSync } from 'fflate';
 import { flushPromises, FakeImage } from '../tests/setup.js';
-import { buildMapArchive, zipStore } from './lib/mapArchive.js';
+import { buildMapArchive } from './lib/mapArchive.js';
 import MapList from './MapList.svelte';
 
 const OriginalImage = globalThis.Image;
+
+/** Build a store-only ZIP, the way `buildMapArchive` writes one. */
+function zipStore(entries) {
+  const files = {};
+  for (const entry of entries) files[entry.name] = entry.data;
+  return zipSync(files, { level: 0 });
+}
 
 const dbMocks = vi.hoisted(() => ({
   getAllMaps: vi.fn(),
@@ -313,6 +321,13 @@ describe('MapList uploads', () => {
       }
     }
     const OriginalImage = globalThis.Image;
+
+/** Build a store-only ZIP, the way `buildMapArchive` writes one. */
+function zipStore(entries) {
+  const files = {};
+  for (const entry of entries) files[entry.name] = entry.data;
+  return zipSync(files, { level: 0 });
+}
     globalThis.Image = SizedImage;
 
     const file = new File(['data'], 'map.png', { type: 'image/png' });

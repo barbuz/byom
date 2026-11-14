@@ -1,4 +1,5 @@
 import { describe, it, expect } from 'vitest';
+import { zipSync } from 'fflate';
 import {
   ARCHIVE_FORMAT,
   ARCHIVE_FORMAT_VERSION,
@@ -10,10 +11,16 @@ import {
   readMapArchive,
   suggestedArchiveName,
   unzip,
-  zipStore,
 } from './mapArchive.js';
 
 const encoder = new TextEncoder();
+
+/** Build a store-only ZIP, the way `buildMapArchive` writes one. */
+function zipStore(entries) {
+  const files = {};
+  for (const entry of entries) files[entry.name] = entry.data;
+  return zipSync(files, { level: 0 });
+}
 
 function concat(chunks) {
   let total = 0;
@@ -117,7 +124,7 @@ describe('zipStore / unzip', () => {
       { name: 'a.txt', data: encoder.encode('hello') },
       { name: 'b.bin', data: new Uint8Array([0, 1, 2, 255]) },
     ]);
-    const entries = await unzip(zip);
+    const entries = unzip(zip);
     expect(new TextDecoder().decode(entries.get('a.txt'))).toBe('hello');
     expect(Array.from(entries.get('b.bin'))).toEqual([0, 1, 2, 255]);
   });
@@ -125,20 +132,20 @@ describe('zipStore / unzip', () => {
   it('reads a deflate-compressed archive, as a desktop zip tool would write', async () => {
     const payload = encoder.encode('deflate me '.repeat(100));
     const zip = await buildZip([{ name: MAP_ENTRY_NAME, data: payload, method: 8 }]);
-    const entries = await unzip(zip);
+    const entries = unzip(zip);
     // A DecompressionStream output is a cross-realm Uint8Array, so compare
     // contents rather than instances.
     expect(Array.from(entries.get(MAP_ENTRY_NAME))).toEqual(Array.from(payload));
   });
 
   it('rejects a non-ZIP blob', async () => {
-    await expect(unzip(encoder.encode('not a zip'))).rejects.toThrow(/not a ZIP/i);
+    expect(() => unzip(encoder.encode('not a zip'))).toThrow(/not a ZIP/i);
   });
 
   it('rejects an entry whose checksum does not match', async () => {
     const zip = zipStore([{ name: 'a.txt', data: encoder.encode('hello') }]);
     zip[centralDirectoryOffset(zip) - 1] ^= 0xff; // corrupt the stored data
-    await expect(unzip(zip)).rejects.toThrow(/checksum/i);
+    expect(() => unzip(zip)).toThrow(/checksum/i);
   });
 
   it('rejects an entry whose declared size does not match its data', async () => {
@@ -146,7 +153,7 @@ describe('zipStore / unzip', () => {
     const central = centralDirectoryOffset(zip);
     const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
     view.setUint32(central + 24, 6, true); // claim one byte more than stored
-    await expect(unzip(zip)).rejects.toThrow(/truncated/i);
+    expect(() => unzip(zip)).toThrow(/truncated/i);
   });
 
   it('rejects an unsupported compression method', async () => {
@@ -154,12 +161,12 @@ describe('zipStore / unzip', () => {
     const central = centralDirectoryOffset(zip);
     const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
     view.setUint16(central + 10, 99, true);
-    await expect(unzip(zip)).rejects.toThrow(/compression method/i);
+    expect(() => unzip(zip)).toThrow(/compression method/i);
   });
 
   it('rejects an unsafe entry name', async () => {
     const zip = zipStore([{ name: '../evil.txt', data: encoder.encode('x') }]);
-    await expect(unzip(zip)).rejects.toThrow(/unsafe entry name/i);
+    expect(() => unzip(zip)).toThrow(/unsafe entry name/i);
   });
 
   it('rejects an archive with too many entries', async () => {
@@ -168,7 +175,7 @@ describe('zipStore / unzip', () => {
       data: encoder.encode('x'),
     }));
     const zip = zipStore(entries);
-    await expect(unzip(zip)).rejects.toThrow(/too many entries/i);
+    expect(() => unzip(zip)).toThrow(/too many entries/i);
   });
 });
 
@@ -221,7 +228,7 @@ describe('buildMapArchive / readMapArchive', () => {
       referencePoints: [],
       imageBlob: new Blob([new Uint8Array([1, 2, 3])], { type: 'image/jpeg' }),
     });
-    const entries = await unzip(new Uint8Array(await archive.arrayBuffer()));
+    const entries = unzip(new Uint8Array(await archive.arrayBuffer()));
     expect(entries.has('image.jpg')).toBe(true);
     const doc = JSON.parse(new TextDecoder().decode(entries.get(MAP_ENTRY_NAME)));
     expect(doc.format).toBe(ARCHIVE_FORMAT);
@@ -235,7 +242,7 @@ describe('buildMapArchive / readMapArchive', () => {
       referencePoints: [{ u: 0, v: 0, lon: 1, lat: 2, accuracy: null }],
       imageBlob: sampleImage(),
     });
-    const entries = await unzip(new Uint8Array(await archive.arrayBuffer()));
+    const entries = unzip(new Uint8Array(await archive.arrayBuffer()));
     const doc = JSON.parse(new TextDecoder().decode(entries.get(MAP_ENTRY_NAME)));
     expect(doc.referencePoints[0]).toEqual({ u: 0, v: 0, lon: 1, lat: 2 });
   });
@@ -421,21 +428,31 @@ describe('unzip — structural corruption', () => {
     const zip = validZip();
     const central = centralDirectoryOffset(zip);
     zip[central] ^= 0xff;
-    await expect(unzip(zip)).rejects.toThrow(/corrupt central directory/i);
+    expect(() => unzip(zip)).toThrow(/corrupt central directory/i);
   });
 
   it('rejects a corrupt local header signature', async () => {
     const zip = validZip();
     zip[0] ^= 0xff;
-    await expect(unzip(zip)).rejects.toThrow(/corrupt local header/i);
+    expect(() => unzip(zip)).toThrow(/corrupt local header/i);
   });
 
-  it('rejects an entry that claims an implausibly large size', async () => {
+  it('rejects an entry that claims an implausibly large size', () => {
     const zip = validZip();
     const central = centralDirectoryOffset(zip);
     const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
     view.setUint32(central + 24, 0xffffffff, true);
-    await expect(unzip(zip)).rejects.toThrow(/too large/i);
+    expect(() => unzip(zip)).toThrow(/too large/i);
+  });
+
+  it('rejects a deflate stream that cannot be decompressed', async () => {
+    // A well-formed central directory whose deflate payload is damaged beyond
+    // recovery, so the failure happens inside the inflater rather than in the
+    // header parsing.
+    const zip = await buildZip([{ name: 'a.txt', data: encoder.encode('hello'.repeat(50)), method: 8 }]);
+    const payloadStart = 30 + encoder.encode('a.txt').length;
+    zip[payloadStart] ^= 0xff;
+    expect(() => unzip(zip)).toThrow(/could not decompress/i);
   });
 });
 

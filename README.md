@@ -61,7 +61,7 @@ On the landing page, maps are grouped into three sections: **Maps here** (maps w
 ### 4. Share a Map
 The **Share** button in the viewer exports the map as a single `.byom` file: the original image plus every reference point. On a phone this opens the native share sheet, so the file can go straight to a messaging app or nearby device; on a desktop browser it downloads instead. The file is a plain ZIP holding the image and a `map.json`, and it never stores the fitted transform — that is recomputed from the reference points on import, so a map always reopens with the current georeferencing.
 
-To import one, add it like any other map (camera or files); BYOM recognises the `.byom` file and stores the map and its points in one step. On desktop ChromeOS/macOS/Windows/Linux, an **installed** BYOM also registers as a handler for `.byom` files, so opening one from the file manager launches BYOM and imports it directly (the File Handling API; it is desktop-only, so this does not apply on Android or iOS, which use the file picker). A file written by a newer BYOM still imports on a best-effort basis, with a warning.
+To import one, add it like any other map (camera or files); BYOM recognises the `.byom` file and stores the map and its points in one step. On desktop ChromeOS/macOS/Windows/Linux, an **installed** BYOM also registers as a handler for `.byom` files, so opening one from the file manager launches BYOM and imports it directly (the File Handling API; it is desktop-only, so this does not apply on Android or iOS, which use the file picker). A file written by a newer BYOM still imports on a best-effort basis, with a warning. An archive is read defensively: each entry's CRC-32 and size are checked, entry names cannot escape the archive, and an oversized archive is refused before it is decompressed. Picking a file that is not a BYOM archive at all gives a specific "not a BYOM map file" message rather than a generic failure.
 
 ## 🔬 Transform Methods
 
@@ -109,6 +109,7 @@ byom/
 - **Svelte** - Reactive UI framework
 - **Vite** - Build tool and dev server
 - **MapLibre GL** - Map rendering for coordinate selection
+- **fflate** - ZIP container for the `.byom` share format
 - **IndexedDB** - Client-side storage (maps + reference points)
 - **Canvas API** - Image rendering and transformations
 - **Geolocation API** - GPS position tracking
