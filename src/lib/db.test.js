@@ -178,6 +178,52 @@ describe('IndexedDB wrapper — cascade delete', () => {
   });
 });
 
+describe('IndexedDB wrapper — importMap', () => {
+  it('stores a map and all its points with fresh ids', async () => {
+    const id = await db.importMap(
+      { name: 'Shared map', imageBlob: 'blob', thumbnail: 'thumb', imageWidth: 800, imageHeight: 600, timestamp: 1700000000000 },
+      [
+        { u: 0.1, v: 0.2, lon: 1, lat: 2, accuracy: 5 },
+        { u: 0.3, v: 0.4, lon: 3, lat: 4, accuracy: null },
+      ],
+    );
+
+    const map = await db.getMap(id);
+    expect(map.name).toBe('Shared map');
+    expect(map.imageWidth).toBe(800);
+    expect(map.timestamp).toBe(1700000000000);
+
+    const points = await db.getReferencePoints(id);
+    expect(points).toHaveLength(2);
+    expect(points[0].mapId).toBe(id);
+    expect(points[0].accuracy).toBe(5);
+    expect(points[1].accuracy).toBeNull();
+  });
+
+  it('imports the same archive twice with distinct ids', async () => {
+    const mapData = { name: 'Dup', imageBlob: 'blob', thumbnail: null, imageWidth: 10, imageHeight: 10 };
+    const first = await db.importMap(mapData, [{ u: 0, v: 0, lon: 1, lat: 2 }]);
+    const second = await db.importMap(mapData, [{ u: 0, v: 0, lon: 1, lat: 2 }]);
+    expect(second).not.toBe(first);
+    expect(await db.getReferencePoints(first)).toHaveLength(1);
+    expect(await db.getReferencePoints(second)).toHaveLength(1);
+  });
+
+  it('leaves no partial map behind when a point insert fails', async () => {
+    // A function is not structured-cloneable, so the point insert fails and the
+    // whole transaction must roll back.
+    const badPoints = [{ u: 0, v: 0, lon: 1, lat: 2 }, { u: () => {}, v: 1, lon: 3, lat: 4 }];
+    await expect(
+      db.importMap({ name: 'Broken', imageBlob: 'blob', thumbnail: null }, badPoints),
+    ).rejects.toBeTruthy();
+
+    // The whole transaction rolled back: the map never landed either.
+    const maps = await db.getAllMaps();
+    expect(maps).toEqual([]);
+    expect(await db.getAllReferencePoints()).toEqual([]);
+  });
+});
+
 describe('IndexedDB wrapper — bulk reference points', () => {
   it('returns every reference point across all maps', async () => {
     const mapA = await db.addMap({ name: 'A', imageBlob: 'a', thumbnail: null });

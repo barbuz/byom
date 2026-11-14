@@ -247,6 +247,55 @@ export async function deleteReferencePoint(pointId) {
 
 
 /**
+ * Store an imported map and all its reference points in a single transaction,
+ * so a failure cannot leave a half-populated map behind. Ids are assigned
+ * fresh, so the same archive can be imported any number of times.
+ * @param {Object} mapData - { name, imageBlob, thumbnail, imageWidth, imageHeight, timestamp }
+ * @param {Array<Object>} referencePoints - [{ u, v, lon, lat, accuracy }]
+ * @returns {Promise<number>} The ID of the imported map
+ */
+export async function importMap(mapData, referencePoints = []) {
+  const db = await initDB();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction([MAPS_STORE, POINTS_STORE], 'readwrite');
+    const mapsStore = transaction.objectStore(MAPS_STORE);
+    const pointsStore = transaction.objectStore(POINTS_STORE);
+
+    const map = {
+      name: mapData.name,
+      imageBlob: mapData.imageBlob,
+      thumbnail: mapData.thumbnail,
+      imageWidth: mapData.imageWidth ?? null,
+      imageHeight: mapData.imageHeight ?? null,
+      timestamp: Number.isFinite(mapData.timestamp) ? mapData.timestamp : Date.now(),
+    };
+
+    const mapRequest = mapsStore.add(map);
+    let mapId = null;
+
+    mapRequest.onsuccess = () => {
+      mapId = mapRequest.result;
+      for (const point of referencePoints) {
+        pointsStore.add({
+          mapId,
+          u: point.u,
+          v: point.v,
+          lon: point.lon,
+          lat: point.lat,
+          accuracy: point.accuracy || null,
+          timestamp: Number.isFinite(point.timestamp) ? point.timestamp : Date.now(),
+        });
+      }
+    };
+    mapRequest.onerror = () => reject(mapRequest.error);
+
+    transaction.oncomplete = () => resolve(mapId);
+    transaction.onerror = () => reject(transaction.error);
+    transaction.onabort = () => reject(transaction.error ?? new Error('Import aborted'));
+  });
+}
+
+/**
  * Decode an image blob to its natural dimensions. `createImageBitmap` reads
  * width/height without an object URL or a DOM `<img>`, and must be closed to
  * release the decoded bitmap.

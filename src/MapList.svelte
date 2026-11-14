@@ -1,8 +1,10 @@
 <script>
   import { onMount } from 'svelte';
-  import { getAllMaps, getAllReferencePoints, addMap, deleteMap } from './lib/db.js';
+  import { getAllMaps, getAllReferencePoints, addMap, importMap, deleteMap } from './lib/db.js';
   import { createPositionWatch } from './lib/geolocation.js';
   import { isPdfFile, loadPdf, renderPdfPageToBlob } from './lib/pdf.js';
+  import { isByomFile, readMapArchive, NotByomError } from './lib/mapArchive.js';
+  import { consumeLaunchedFiles } from './lib/fileLaunch.js';
   import PdfPagePicker from './components/PdfPagePicker.svelte';
   import {
     DEFAULT_DIRECTION,
@@ -47,6 +49,15 @@
   const APP_VERSION = __APP_VERSION__;
 
   onMount(loadMaps);
+
+  // An installed BYOM opened with a `.byom` file (Android/Chromium) hands the
+  // file over here; the input path is the fallback everywhere else.
+  onMount(() => {
+    consumeLaunchedFiles(async (files) => {
+      for (const file of files) await processFile(file);
+      await loadMaps();
+    });
+  });
 
   onMount(() => {
     const watch = createPositionWatch({
@@ -175,10 +186,16 @@
     event.target.value = ''; // Reset input
   }
 
-  // A PDF is rasterised to a PNG up front, so from here on the flow is the same
-  // as an image upload.
+  // A PDF is rasterised to a PNG up front and a `.byom` archive is unpacked, so
+  // from here on the flow is the same as an image upload: produce a blob and a
+  // name, then store it.
   async function processFile(file) {
     try {
+      if (await isByomFile(file)) {
+        await importArchive(file);
+        return;
+      }
+
       const source = isPdfFile(file) ? await rasterisePdf(file) : { blob: file, name: file.name };
       if (!source) return; // page choice was cancelled
 
@@ -192,8 +209,36 @@
       });
     } catch (error) {
       console.error('Error processing file:', error);
-      alert(`Failed to process ${file.name}`);
+      // A file that is not a BYOM archive at all (e.g. an ordinary `.zip`) gets
+      // a specific message; a genuine bug in the import path stays generic.
+      if (error instanceof NotByomError) {
+        alert(`${file.name} is not a BYOM map file. Choose a map image, a PDF, or a .byom file.`);
+      } else {
+        alert(`Failed to process ${file.name}`);
+      }
     }
+  }
+
+  // A shared map arrives as a `.byom` archive. The thumbnail is regenerated
+  // locally rather than trusted from the archive, and the map plus its points
+  // are stored in one transaction so a failure leaves nothing half-imported.
+  async function importArchive(file) {
+    const { map, referencePoints, imageBlob, warnings } = await readMapArchive(file);
+    const { thumbnail, width, height } = await createThumbnail(imageBlob);
+
+    await importMap(
+      {
+        name: map.name,
+        imageBlob,
+        thumbnail,
+        imageWidth: map.imageWidth ?? width,
+        imageHeight: map.imageHeight ?? height,
+        timestamp: map.createdAt ?? Date.now(),
+      },
+      referencePoints,
+    );
+
+    if (warnings.length > 0) alert(warnings.join('\n\n'));
   }
 
   async function rasterisePdf(file) {
@@ -300,6 +345,10 @@
   // capture hint) only duplicates the platform's own choice. PDF is included
   // because a map is often a sheet, and on Android/Chromium a non-image type in
   // `accept` is also what restores the Camera entry that `image/*` alone hides.
+  // `.byom` lets a shared map be picked like any other file; the generic zip
+  // types are deliberately absent, so the dialog does not offer every `.zip` on
+  // the device. A `.byom` whose extension was stripped still imports, because
+  // `isByomFile` also matches a zip MIME with ZIP magic bytes.
   function openFilePicker() {
     fileInput.click();
   }
@@ -319,7 +368,7 @@
     <input
       bind:this={fileInput}
       type="file"
-      accept="image/*,application/pdf"
+      accept="image/*,application/pdf,.byom"
       onchange={handleFileSelect}
       style="display: none;"
     />

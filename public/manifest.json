@@ -22,5 +22,13 @@
     }
   ],
   "categories": ["navigation", "utilities"],
+  "file_handlers": [
+    {
+      "action": "/byom/",
+      "accept": {
+        "application/zip": [".byom"]
+      }
+    }
+  ],
   "screenshots": []
 }

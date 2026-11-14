@@ -869,3 +869,112 @@ describe("MapViewer graticule", () => {
     assert.equal(bezierCount(), 0);
   });
 });
+
+describe("MapViewer sharing", () => {
+  const shareButton = () => screen.getByRole("button", { name: /Share/ });
+
+  // A real Blob, so the archive can actually be built; the default test map has
+  // a placeholder imageBlob with no bytes.
+  function stubSharableMap(name = "Old town plan") {
+    getMap.mockResolvedValue({
+      id: 1,
+      name,
+      imageBlob: new Blob([new Uint8Array([137, 80, 78, 71])], { type: "image/png" }),
+      imageWidth: 800,
+      imageHeight: 600,
+    });
+  }
+
+  it("shares the map as a .byom file through the native share sheet", async () => {
+    const share = vi.fn(async () => {});
+    const canShare = vi.fn(() => true);
+    vi.stubGlobal("navigator", { ...navigator, share, canShare });
+
+    stubSharableMap();
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(shareButton());
+    await sleep(30);
+
+    assert.equal(canShare.mock.calls.length, 1);
+    assert.equal(share.mock.calls.length, 1);
+    const shared = share.mock.calls[0][0];
+    assert.equal(shared.files.length, 1);
+    assert.ok(shared.files[0] instanceof File);
+    assert.equal(shared.files[0].name, "Old town plan.byom");
+    assert.equal(shared.files[0].type, "application/zip");
+  });
+
+  it("falls back to a download when files cannot be shared", async () => {
+    const share = vi.fn(async () => {});
+    vi.stubGlobal("navigator", { ...navigator, share, canShare: () => false });
+
+    const clicks = [];
+    const originalClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () {
+      clicks.push({ download: this.download, href: this.href });
+    };
+
+    stubSharableMap();
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(shareButton());
+    await sleep(30);
+
+    assert.equal(share.mock.calls.length, 0);
+    assert.equal(clicks.length, 1);
+    assert.equal(clicks[0].download, "Old town plan.byom");
+
+    HTMLAnchorElement.prototype.click = originalClick;
+  });
+
+  it("treats a cancelled share as a no-op", async () => {
+    const abort = new Error("cancelled");
+    abort.name = "AbortError";
+    const share = vi.fn(async () => { throw abort; });
+    vi.stubGlobal("navigator", { ...navigator, share, canShare: () => true });
+
+    const clicks = [];
+    const originalClick = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function () { clicks.push(this.download); };
+
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+
+    stubSharableMap();
+    getReferencePoints.mockResolvedValue(REF_POINTS);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(shareButton());
+    await sleep(30);
+
+    // A cancel is neither an error nor a download.
+    assert.equal(clicks.length, 0);
+    assert.equal(alertSpy.mock.calls.length, 0);
+
+    HTMLAnchorElement.prototype.click = originalClick;
+    alertSpy.mockRestore();
+  });
+
+  it("alerts when building the archive fails", async () => {
+    const alertSpy = vi.spyOn(window, "alert").mockImplementation(() => {});
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubGlobal("navigator", { ...navigator, canShare: () => false });
+
+    getMap.mockResolvedValue({ id: 1, name: "Broken", imageBlob: null });
+    getReferencePoints.mockResolvedValue([]);
+    await mountViewer();
+    await sleep(30);
+
+    fireEvent.click(shareButton());
+    await sleep(30);
+
+    assert.equal(alertSpy.mock.calls.length, 1);
+    errorSpy.mockRestore();
+    alertSpy.mockRestore();
+  });
+});
