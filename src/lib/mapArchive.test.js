@@ -108,6 +108,27 @@ function centralDirectoryOffset(zip) {
   return view.getUint32(zip.byteLength - 22 + 16, true);
 }
 
+/** Central-directory metadata (method + sizes) for each entry, by name. */
+function centralEntries(zip) {
+  const view = new DataView(zip.buffer, zip.byteOffset, zip.byteLength);
+  const decoder = new TextDecoder();
+  const count = view.getUint16(zip.byteLength - 22 + 10, true);
+  const entries = {};
+  let cursor = centralDirectoryOffset(zip);
+  for (let i = 0; i < count; i += 1) {
+    const nameLength = view.getUint16(cursor + 28, true);
+    const name = decoder.decode(zip.subarray(cursor + 46, cursor + 46 + nameLength));
+    entries[name] = {
+      method: view.getUint16(cursor + 10, true),
+      compressedSize: view.getUint32(cursor + 20, true),
+      size: view.getUint32(cursor + 24, true),
+    };
+    cursor += 46 + nameLength
+      + view.getUint16(cursor + 30, true) + view.getUint16(cursor + 32, true);
+  }
+  return entries;
+}
+
 describe('crc32', () => {
   it('matches the standard CRC-32 check value', () => {
     expect(crc32(encoder.encode('123456789'))).toBe(0xcbf43926);
@@ -234,6 +255,24 @@ describe('buildMapArchive / readMapArchive', () => {
     expect(doc.format).toBe(ARCHIVE_FORMAT);
     expect(doc.formatVersion).toBe(ARCHIVE_FORMAT_VERSION);
     expect(doc.map.imageFile).toBe('image.jpg');
+  });
+
+  it('deflates map.json but stores the image', async () => {
+    const points = Array.from({ length: 200 }, (_, i) => ({
+      u: i / 200, v: (i % 13) / 13, lon: 8 + i / 1e4, lat: 47 - i / 1e4,
+    }));
+    const archive = await buildMapArchive({
+      map: SAMPLE_MAP,
+      referencePoints: points,
+      imageBlob: sampleImage(),
+    });
+    const entries = centralEntries(new Uint8Array(await archive.arrayBuffer()));
+
+    expect(entries[MAP_ENTRY_NAME].method).toBe(8);
+    expect(entries[MAP_ENTRY_NAME].compressedSize)
+      .toBeLessThan(entries[MAP_ENTRY_NAME].size);
+    expect(entries['image.png'].method).toBe(0);
+    expect(entries['image.png'].compressedSize).toBe(entries['image.png'].size);
   });
 
   it('omits the accuracy field when a point has none', async () => {

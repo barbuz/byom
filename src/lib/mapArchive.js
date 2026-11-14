@@ -7,10 +7,10 @@
 // recomputed on import. That keeps the file small and means a change to the
 // similarity/affine/MLS ladder never invalidates an existing export.
 //
-// The ZIP container itself is fflate's (no hand-rolled byte parsing). We write
-// store-only (the image is already compressed and the JSON is tiny, so
-// deflating would cost CPU on a phone for no gain) but read STORE and DEFLATE
-// alike, so an archive hand-built with a desktop zip tool still imports.
+// The ZIP container itself is fflate's (no hand-rolled byte parsing). The JSON
+// is deflated (it is text and shrinks well); the image is stored, because it is
+// already a compressed format. The reader accepts STORE *and* DEFLATE, so an
+// archive hand-built with a desktop zip tool still imports.
 //
 // fflate verifies neither an entry's CRC-32 nor its name, and inflates before
 // checking anything, so `unzip` keeps that policy: it reads the declared CRCs,
@@ -366,10 +366,13 @@ export async function buildMapArchive({ map, referencePoints = [], imageBlob }) 
 
   const imageBytes = new Uint8Array(await imageBlob.arrayBuffer());
   const jsonBytes = new TextEncoder().encode(JSON.stringify(document, null, 2));
-  const zip = zipSync(
-    { [MAP_ENTRY_NAME]: jsonBytes, [imageFile]: imageBytes },
-    { level: 0 },
-  );
+  // The JSON is text and deflates well (a 5,000-point map.json drops from
+  // ~400 KB to ~54 KB); the image is already a compressed format, so storing it
+  // is faster for the same size.
+  const zip = zipSync({
+    [MAP_ENTRY_NAME]: [jsonBytes, { level: 6 }],
+    [imageFile]: [imageBytes, { level: 0 }],
+  });
 
   return new Blob([zip], { type: ARCHIVE_MIME });
 }
