@@ -28,6 +28,6 @@ describe("main bootstrap", () => {
 
     await import("./main.js");
 
-    expect(target.textContent).toContain("Bring Your Own Map");
+    expect(target.textContent).toContain("bring your own map");
   });
 });

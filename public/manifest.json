@@ -1,11 +1,11 @@
 {
-  "name": "BYOM - Bring Your Own Map",
-  "short_name": "BYOM",
-  "description": "Georeference map photos and view your GPS location offline",
+  "name": "byom — bring your own map",
+  "short_name": "byom",
+  "description": "Georeference a photo of a map, then navigate it offline.",
   "start_url": "/byom/",
   "display": "standalone",
-  "background_color": "#ffffff",
-  "theme_color": "#2196F3",
+  "background_color": "#faf8f3",
+  "theme_color": "#faf8f3",
   "orientation": "any",
   "icons": [
     {

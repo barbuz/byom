@@ -1,4 +1,6 @@
-<svg width="192" height="192" xmlns="http://www.w3.org/2000/svg">
-  <rect width="192" height="192" fill="#2196F3"/>
-  <text x="96" y="120" font-size="80" text-anchor="middle" fill="white" font-family="Arial, sans-serif">🗺️</text>
+<svg width="192" height="192" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <rect width="64" height="64" rx="14" fill="#faf8f3"/>
+  <rect x="12" y="14" width="40" height="36" rx="4" fill="none" stroke="#1b1a17" stroke-width="4"/>
+  <path d="M18 42 L27 32 L34 38 L45 24" fill="none" stroke="#1d4ed8" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <circle cx="45" cy="24" r="4" fill="#1d4ed8"/>
 </svg>

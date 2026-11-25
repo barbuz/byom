@@ -976,21 +976,21 @@
       class="control-btn edit-points-btn {showingPoints ? 'active' : ''}" 
       onclick={togglePoints}
     >
-      {showingPoints ? '👁️' : '📝'} Points ({referencePoints.length})
+      Points ({referencePoints.length})
     </button>
 
     <button 
       class="control-btn debug-btn {showingDebug ? 'active' : ''}" 
       onclick={toggleDebug}
     >
-      🐛 Debug
+      Debug
     </button>
 
     <button
       class="control-btn grid-btn {showingGrid ? 'active' : ''}"
       onclick={toggleGrid}
     >
-      🌐 Grid
+      Grid
     </button>
 
     <button
@@ -998,7 +998,7 @@
       onclick={shareMap}
       disabled={sharing}
     >
-      📤 Share
+      Share
     </button>
   </div>
 
@@ -1032,10 +1032,10 @@
   {#if showingPoints && referencePoints.length > 0}
     <div class="points-info">
       <div class="points-hint">
-        💡 Tap or click a point to edit
+        Tap or click a point to edit
       </div>
       <div class="points-hint">
-        📍 Add points: tap or click on the map
+        Add points: tap or click on the map
       </div>
       {#if geoTransformError}
         <div class="transform-status transform-error">
@@ -1070,7 +1070,7 @@
         </div>
       {:else}
         <div class="points-hint">
-          📍 Add reference points: tap or click on the map
+          Add reference points: tap or click on the map
         </div>
       {/if}
     </div>
@@ -1110,7 +1110,7 @@
         
         <div class="button-group">
           <button class="btn btn-danger" onclick={deleteEditingPoint}>
-            🗑️ Delete
+            Delete
           </button>
           <button class="btn btn-secondary" onclick={cancelEdit}>
             Cancel
@@ -1126,7 +1126,7 @@
   {#if showingDebug}
     <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) toggleDebug(); }} onkeydown={(e) => { if (e.key === 'Escape') toggleDebug(); }}>
       <div class="modal-content debug-modal">
-        <h2>🐛 Debug Information</h2>
+        <h2>Debug Information</h2>
         
         <div class="debug-section">
           <h3>Current GPS Position</h3>
@@ -1248,7 +1248,7 @@
   {#if showingCoordinateSelection}
     <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) hideCoordinateSelection(); }} onkeydown={(e) => { if (e.key === 'Escape') hideCoordinateSelection(); }}>
       <div class="modal-content">
-        <h2>📍 Add Reference Point</h2>
+        <h2>Add Reference Point</h2>
         
         <div class="point-edit-info">
           <div class="info-row">
@@ -1262,19 +1262,16 @@
         {#if !coordinateMethod}
           <div class="method-selection">
             <button class="method-btn" onclick={() => selectCoordinateMethod('gps')}>
-              <div class="method-icon">📍</div>
               <div class="method-title">Use GPS</div>
               <div class="method-desc">Use current device location</div>
             </button>
             
             <button class="method-btn" onclick={() => selectCoordinateMethod('manual')}>
-              <div class="method-icon">⌨️</div>
               <div class="method-title">Manual Entry</div>
               <div class="method-desc">Type coordinates</div>
             </button>
             
             <button class="method-btn" onclick={() => selectCoordinateMethod('map')}>
-              <div class="method-icon">🗺️</div>
               <div class="method-title">Select on Map</div>
               <div class="method-desc">Choose from OSM map (online)</div>
             </button>
@@ -1297,7 +1294,7 @@
                 </div>
               </div>
             {:else}
-              <div class="loading-message">📡 Getting GPS location...</div>
+              <div class="loading-message">Getting GPS location...</div>
             {/if}
             <button class="btn btn-secondary" onclick={() => coordinateMethod = null}>
               Choose Different Method
