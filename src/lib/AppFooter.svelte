@@ -7,7 +7,7 @@
   <p class="app-footer__links">
     <a class="app-footer__brand" href="https://barbuz.github.io" aria-label="made by barbuz">
       <img class="app-footer__mark" src={barbuzMark} alt="" />
-      <span>made by <strong>arbuz</strong></span>
+      <span>made by <strong>barbuz</strong></span>
     </a>
     <span class="app-footer__dot" aria-hidden="true">·</span>
     <a href="https://github.com/barbuz/byom">source <span aria-hidden="true">↗</span></a>

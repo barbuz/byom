@@ -19,6 +19,7 @@
   } from './lib/mapMatch.js';
   import AppMark from './lib/AppMark.svelte';
   import AppFooter from './lib/AppFooter.svelte';
+  import Icon from './lib/Icon.svelte';
   import './styles/MapList.css';
 
   // A fix this close to the last classified one is not worth a recompute.
@@ -405,6 +406,7 @@
     <section class="map-section">
       <div class="section-header">
         <div class="section-title">
+          <Icon name="map-pin" size={18} className="section-icon" />
           <h2>Maps here</h2>
           {#if nearMaps.length > 0}<span class="count">{nearMaps.length}</span>{/if}
         </div>
@@ -429,6 +431,7 @@
       <section class="map-section">
         <div class="section-header">
           <div class="section-title">
+            <Icon name="alert" size={18} className="section-icon" />
             <h2>Incomplete</h2>
             <span class="count">{incompleteMaps.length}</span>
           </div>
@@ -446,6 +449,7 @@
       <section class="map-section">
         <div class="section-header">
           <div class="section-title">
+            <Icon name="map" size={18} className="section-icon" />
             <h2>Other maps</h2>
             <span class="count">{otherMaps.length}</span>
           </div>
