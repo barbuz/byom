@@ -1,10 +1,14 @@
 <script>
   let { version = '' } = $props();
+  const barbuzMark = `${import.meta.env.BASE_URL}barbuz-mark.svg`;
 </script>
 
 <footer class="app-footer">
   <p class="app-footer__links">
-    <a href="https://barbuz.github.io">made by barbuz</a>
+    <a class="app-footer__brand" href="https://barbuz.github.io" aria-label="made by barbuz">
+      <img class="app-footer__mark" src={barbuzMark} alt="" />
+      <span>made by <strong>arbuz</strong></span>
+    </a>
     <span class="app-footer__dot" aria-hidden="true">·</span>
     <a href="https://github.com/barbuz/byom">source <span aria-hidden="true">↗</span></a>
     <span class="app-footer__dot" aria-hidden="true">·</span>
@@ -42,6 +46,27 @@
 
   .app-footer a:hover {
     color: var(--accent);
+  }
+
+  .app-footer__brand {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+  }
+
+  .app-footer__mark {
+    height: 1.05em;
+    width: auto;
+    display: block;
+  }
+
+  .app-footer__brand strong {
+    color: var(--text);
+    font-weight: 600;
+  }
+
+  .app-footer__brand:hover strong {
+    color: inherit;
   }
 
   .app-footer__dot {
