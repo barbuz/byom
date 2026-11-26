@@ -60,9 +60,54 @@ function serviceWorkerVersioning() {
   };
 }
 
+const VERSION_QUERY = `v=${pkg.version}`;
+
+const withVersion = (url) => `${url}${url.includes('?') ? '&' : '?'}${VERSION_QUERY}`;
+
+/**
+ * The icon, the favicon and the manifest keep fixed URLs, and browsers cache
+ * them hard — an installed PWA can keep an old home-screen icon for days after
+ * a deploy. Stamping the release onto those URLs makes every release a URL the
+ * browser has never seen, so the icon is fetched again.
+ */
+function publicAssetVersioning() {
+  let isBuild = false;
+
+  return {
+    name: 'byom:public-asset-versioning',
+    enforce: 'post',
+
+    configResolved(config) {
+      isBuild = config.command === 'build';
+    },
+
+    transformIndexHtml(html) {
+      return html.replace(
+        /href="(\/byom\/|\/)?(favicon\.svg|manifest\.json)"/g,
+        (_match, prefix = '', file) => `href="${withVersion(`${prefix}${file}`)}"`,
+      );
+    },
+
+    closeBundle() {
+      // public/ is copied verbatim after the bundle is written, so the manifest
+      // is patched on disk here rather than through generateBundle.
+      if (!isBuild) return;
+
+      const output = resolve(__dirname, 'dist/manifest.json');
+      if (!existsSync(output)) {
+        this.warn(`manifest.json not found at ${output}; icon URLs left unversioned`);
+        return;
+      }
+      const manifest = JSON.parse(readFileSync(output, 'utf8'));
+      manifest.icons = manifest.icons.map((icon) => ({ ...icon, src: withVersion(icon.src) }));
+      writeFileSync(output, `${JSON.stringify(manifest, null, 2)}\n`);
+    },
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
-  plugins: [svelte(), serviceWorkerVersioning()],
+  plugins: [svelte(), serviceWorkerVersioning(), publicAssetVersioning()],
   define: {
     // Single source of truth for the release id shown in the UI.
     __APP_VERSION__: JSON.stringify(pkg.version),

@@ -24,7 +24,25 @@ const SHELL_ASSETS = [
   '/byom/',
   OFFLINE_URL,
   '/byom/manifest.json',
+  '/byom/favicon.svg',
+  '/byom/icon-192.png',
+  '/byom/icon-512.png',
 ];
+
+// Public files keep fixed URLs, so they belong in the versioned shell cache: a
+// cached icon in the unversioned ASSET_CACHE would outlive every deploy. The
+// build stamps the release onto these URLs (see vite.config.js), but the
+// pathname is what decides the cache, so a stale query never pins an old file.
+const SHELL_PATHS = new Set([
+  '/byom/',
+  '/byom/index.html',
+  '/byom/manifest.json',
+  '/byom/favicon.svg',
+  '/byom/icon-192.png',
+  '/byom/icon-192.svg',
+  '/byom/icon-512.png',
+  '/byom/icon-512.svg',
+]);
 
 // PDF.js runs its parser in a worker, which the browser fetches with
 // destination 'worker'; without it here, PDF import would fail offline.
@@ -97,6 +115,11 @@ self.addEventListener('fetch', (event) => {
 
   if (request.mode === 'navigate') {
     event.respondWith(serveShell(request));
+    return;
+  }
+
+  if (SHELL_PATHS.has(new URL(request.url).pathname)) {
+    event.respondWith(cacheFirst(request, SHELL_CACHE));
     return;
   }
 
