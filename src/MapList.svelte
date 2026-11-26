@@ -369,7 +369,7 @@
     </div>
 
     <div class="topbar-actions">
-      <ThemeToggle />
+      <div class="theme-slot"><ThemeToggle /></div>
       <button class="upload-btn" onclick={openFilePicker}>
         <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
           <path d="M12 5v14M5 12h14" />

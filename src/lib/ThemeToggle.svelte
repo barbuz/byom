@@ -25,17 +25,15 @@
 >
   <span class="thumb" aria-hidden="true"></span>
   <span class="option" class:on={current === 'light'}>
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true">
       <circle cx="12" cy="12" r="4" />
       <path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M19.1 4.9l-1.4 1.4M6.3 17.7l-1.4 1.4" />
     </svg>
-    <span>Day</span>
   </span>
   <span class="option" class:on={current === 'dark'}>
-    <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" aria-hidden="true">
       <path d="M20 14.5A8.5 8.5 0 1 1 9.5 4a7 7 0 0 0 10.5 10.5Z" />
     </svg>
-    <span>Night</span>
   </span>
 </button>
 
@@ -46,7 +44,7 @@
     grid-template-columns: 1fr 1fr;
     align-items: center;
     flex: 0 0 auto;
-    width: 6.4rem;
+    width: 3.9rem;
     height: 1.95rem;
     padding: 0.15rem;
     border: 1px solid var(--line);
@@ -60,7 +58,7 @@
     position: absolute;
     top: 0.15rem;
     left: 0.15rem;
-    width: 3rem;
+    width: 1.55rem;
     height: 1.55rem;
     border: 1px solid var(--accent);
     border-radius: 999px;
@@ -69,7 +67,7 @@
   }
 
   .theme-toggle.is-dark .thumb {
-    transform: translateX(3.1rem);
+    transform: translateX(1.9rem);
   }
 
   .option {
@@ -78,9 +76,6 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 0.18rem;
-    font-size: 0.66rem;
-    font-weight: 600;
     transition: color var(--dur-fast) var(--ease);
   }
 
