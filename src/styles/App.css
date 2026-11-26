@@ -2,6 +2,13 @@
 
 :root {
   color-scheme: light;
+  --font-display: 'Instrument Serif', Georgia, serif;
+  --font-body: 'Instrument Sans', system-ui, sans-serif;
+  --font-display-weight: 400;
+}
+
+:root[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 * {

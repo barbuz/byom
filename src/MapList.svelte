@@ -20,6 +20,7 @@
   import AppMark from './lib/AppMark.svelte';
   import AppFooter from './lib/AppFooter.svelte';
   import Icon from './lib/Icon.svelte';
+  import ThemeToggle from './lib/ThemeToggle.svelte';
   import './styles/MapList.css';
 
   // A fix this close to the last classified one is not worth a recompute.
@@ -367,12 +368,15 @@
       </div>
     </div>
 
-    <button class="upload-btn" onclick={openFilePicker}>
-      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
-        <path d="M12 5v14M5 12h14" />
-      </svg>
-      Add a map
-    </button>
+    <div class="topbar-actions">
+      <ThemeToggle />
+      <button class="upload-btn" onclick={openFilePicker}>
+        <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+          <path d="M12 5v14M5 12h14" />
+        </svg>
+        Add a map
+      </button>
+    </div>
 
     <input
       bind:this={fileInput}

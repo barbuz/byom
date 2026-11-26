@@ -15,12 +15,13 @@
 }
 
 .modal {
-  background: white;
+  background: var(--surface);
+  color: var(--text);
   border-radius: 12px;
   padding: 1.5rem;
   width: 100%;
   max-width: 320px;
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.25);
+  box-shadow: var(--shadow);
 }
 
 .pdf-modal {
@@ -34,7 +35,7 @@
 
 .modal-subtitle {
   margin: 0 0 1rem;
-  color: #666;
+  color: var(--muted);
   font-size: 0.9rem;
   overflow-wrap: anywhere;
 }
@@ -47,7 +48,7 @@
   justify-content: center;
   height: 45vh;
   min-height: 200px;
-  background: #f2f2f2;
+  background: var(--surface-2);
   border-radius: 8px;
   overflow: hidden;
 }
@@ -79,7 +80,7 @@
 
 .pdf-preview-error {
   margin: 0;
-  color: #b00020;
+  color: var(--danger);
   font-size: 0.9rem;
 }
 
@@ -94,9 +95,10 @@
   flex: none;
   width: 2.25rem;
   height: 2.25rem;
-  border: 1px solid #ddd;
+  border: 1px solid var(--line);
   border-radius: 6px;
-  background: white;
+  background: var(--surface);
+  color: var(--text);
   font-size: 1.25rem;
   line-height: 1;
   cursor: pointer;
@@ -126,8 +128,10 @@
 .modal-field input {
   width: 5rem;
   padding: 0.4rem;
-  border: 1px solid #ccc;
+  border: 1px solid var(--line);
   border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
   font-size: 1rem;
 }
 
@@ -142,13 +146,14 @@
   width: auto;
   padding: 0.5rem 1rem;
   border-radius: 6px;
-  border: 1px solid #ddd;
-  background: white;
+  border: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--text);
   cursor: pointer;
 }
 
 .modal-actions .menu-item.primary {
-  background: #2196F3;
-  border-color: #2196F3;
-  color: white;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--accent-ink);
 }

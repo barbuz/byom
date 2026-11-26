@@ -54,6 +54,13 @@ h1 {
   text-overflow: ellipsis;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 0 0 auto;
+}
+
 .upload-btn {
   display: inline-flex;
   align-items: center;
@@ -313,10 +320,13 @@ h1 {
     flex-wrap: wrap;
   }
 
-  .upload-btn {
+  .topbar-actions {
     width: 100%;
+  }
+
+  .upload-btn {
+    flex: 1;
     justify-content: center;
-    order: 3;
   }
 }
 
