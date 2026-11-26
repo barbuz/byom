@@ -744,7 +744,7 @@ describe("MapViewer point editing", () => {
   // The component sizes the canvas to the viewport and fits the 800x600
   // image into it, so the first reference point is not at its raw pixel
   // position on screen. Replicate that fit to find where to click.
-  async function openEditModal() {
+  async function openEditModal({ offsetX = 0, offsetY = 0 } = {}) {
     getReferencePoints.mockResolvedValue(REF_POINTS);
     await mountViewer();
     fireEvent.click(screen.getByText(/Points \(2\)/));
@@ -756,10 +756,17 @@ describe("MapViewer point editing", () => {
     const first = pointPixels(REF_POINTS[0]);
     const screenX = canvasWidth / 2 + (first.x - 400) * scale;
     const screenY = canvasHeight / 2 + (first.y - 300) * scale;
-    clickCanvasAt(screenX, screenY);
+    clickCanvasAt(screenX + offsetX, screenY + offsetY);
     await flushPromises();
     await screen.findByText(/Edit Point #1/);
   }
+
+  it("opens a point when its flag is tapped above the foot", async () => {
+    // The flag flies up and to the right of the point it marks, so a tap on
+    // the pennant must edit the point rather than start a new one. The offset
+    // is beyond the 20 px foot radius, so only the flag body can account for it.
+    await openEditModal({ offsetX: 12, offsetY: -24 });
+  });
 
   it("persists edited coordinates through the db layer", async () => {
     await openEditModal();

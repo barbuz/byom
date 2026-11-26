@@ -1,5 +1,6 @@
 import { geoToUV, geoDistanceToUV, imageDivisor } from './transforms.js';
 import { pickGridStepForScale, visibleLines } from './grid.js';
+import { PENNANT_CONTROL, POINT_FLAG } from './flagMark.js';
 
 // The user marker is a screen-space overlay: its radius is in CSS pixels and
 // must not grow with the map. The accuracy ring, however, is a ground distance
@@ -13,6 +14,12 @@ const GRID_LINE_WIDTH = 1;
 const GRID_LABEL_FONT = '11px sans-serif';
 const GRID_LABEL_COLOR = 'rgba(255, 255, 255, 0.85)';
 const GRID_LABEL_HALO = 'rgba(0, 0, 0, 0.7)';
+
+// Reference-point flags: the accent marks a placed point, the warning orange
+// one being edited or dropped.
+const POINT_COLOR = '#1d4ed8';
+const POINT_COLOR_HOVER = '#2563eb';
+const POINT_COLOR_PENDING = '#ff9800';
 
 // Scale the current transform about a fixed point, so a marker drawn afterwards
 // stays centered while its radius changes in screen space. Expressed as one
@@ -39,8 +46,8 @@ function drawAccuracyRing(ctx, point, geoTransform, imageWidth, imageHeight) {
   const accuracyRadius = geoDistanceToUV(point.lon, point.lat, point.accuracy, geoTransform)
     * imageDivisor(imageWidth, imageHeight);
   const { x, y } = toPixels(point.u, point.v, imageWidth, imageHeight);
-  ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
-  ctx.strokeStyle = 'rgba(33, 150, 243, 0.35)';
+  ctx.fillStyle = 'rgba(29, 78, 216, 0.1)';
+  ctx.strokeStyle = 'rgba(29, 78, 216, 0.35)';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(x, y, accuracyRadius, 0, Math.PI * 2);
@@ -48,8 +55,109 @@ function drawAccuracyRing(ctx, point, geoTransform, imageWidth, imageHeight) {
   ctx.stroke();
 }
 
-export function drawReferencePoints(ctx, points, transform, imageWidth, imageHeight, options) {
-  const { showingPoints = false, editingPointId = null, hoverPointIndex = -1, scale = transform.scale, geoTransform = null } = { ...options };
+/**
+ * Draw the mark with its foot at the current origin: a flagpole whose bowl is
+ * the pennant. Callers have already translated to the point, cancelled the map
+ * scale and counter-rotated, so the flag is upright and the same size at any
+ * zoom. Returns the flag's top edge, where the number badge attaches.
+ */
+function drawFlag(ctx, color, scale = 1) {
+  const poleHeight = POINT_FLAG.poleHeight * scale;
+  const poleWidth = POINT_FLAG.poleWidth * scale;
+  const flagWidth = POINT_FLAG.width * scale;
+  const flagHeight = POINT_FLAG.height * scale;
+  const top = -poleHeight;
+  const mid = top + flagHeight;
+
+  const pennant = () => {
+    ctx.beginPath();
+    ctx.moveTo(0, top);
+    ctx.quadraticCurveTo(
+      flagWidth * PENNANT_CONTROL.x,
+      top + flagHeight * PENNANT_CONTROL.y,
+      flagWidth,
+      mid,
+    );
+    ctx.lineTo(0, mid);
+    ctx.closePath();
+  };
+
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  // Stroke a white halo first; the fills painted over it leave only the rim,
+  // which keeps the flag readable over dark map features.
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = POINT_FLAG.halo * 2;
+  pennant();
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, top);
+  ctx.lineWidth = poleWidth + POINT_FLAG.halo * 2;
+  ctx.stroke();
+
+  ctx.fillStyle = color;
+  pennant();
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = poleWidth;
+  ctx.beginPath();
+  ctx.moveTo(0, 0);
+  ctx.lineTo(0, top);
+  ctx.stroke();
+
+  // A knob at the foot makes the planted location explicit.
+  ctx.beginPath();
+  ctx.arc(0, 0, POINT_FLAG.footRadius * scale, 0, Math.PI * 2);
+  ctx.fillStyle = color;
+  ctx.fill();
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = 1.2;
+  ctx.stroke();
+
+  ctx.restore();
+  return top;
+}
+
+function drawPointNumber(ctx, label, flagTop, color) {
+  ctx.font = 'bold 12px sans-serif';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+
+  const width = ctx.measureText(label).width + 10;
+  const height = POINT_FLAG.badgeHeight;
+  // The badge straddles the pole's top so it reads as a plate on the pole.
+  const centerY = flagTop - POINT_FLAG.badgeCentreUp;
+
+  ctx.fillStyle = color;
+  ctx.fillRect(-width / 2, centerY - height / 2, width, height);
+  ctx.fillStyle = 'white';
+  ctx.fillText(label, 0, centerY);
+}
+
+/** Translate to the point and undo the map transform, leaving screen pixels. */
+function enterMarkerFrame(ctx, x, y, scale, rotation) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1 / scale, 1 / scale);
+  ctx.rotate(-rotation);
+}
+
+function markerScale(scale) {
+  return Number.isFinite(scale) && scale !== 0 ? scale : 1;
+}
+
+export function drawReferencePoints(ctx, points, transform, imageWidth, imageHeight, options = {}) {
+  const {
+    showingPoints = false,
+    editingPointId = null,
+    hoverPointIndex = -1,
+    scale = transform.scale,
+    geoTransform = null,
+  } = options;
+  const mapScale = markerScale(scale);
 
   points.forEach((point, index) => {
     const isHovered = hoverPointIndex === index;
@@ -62,53 +170,30 @@ export function drawReferencePoints(ctx, points, transform, imageWidth, imageHei
     }
 
     const { x, y } = toPixels(point.u, point.v, imageWidth, imageHeight);
+    const color = isEditing ? POINT_COLOR_PENDING : isHovered ? POINT_COLOR_HOVER : POINT_COLOR;
+    const flagScale = isHovered || isEditing ? POINT_FLAG.hoverScale : 1;
 
-    ctx.fillStyle = isEditing ? 'rgba(255, 152, 0, 0.9)' : isHovered ? 'rgba(33, 150, 243, 0.9)' : 'rgba(33, 150, 243, 0.7)';
-    ctx.beginPath();
-    ctx.arc(x, y, isHovered ||	isEditing ?	 12 :	 8,	0, Math.PI *	 2);
-    ctx.fill();
-    ctx.strokeStyle =	'white';
-    ctx.lineWidth =	isEditing ?	 3 :	 2;
-    ctx.stroke();
-
-    // Draw number label (counter-rotated to screen space)
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(1 / scale,	1 / scale);
-    ctx.rotate(-transform.rotation);
-
-    ctx.font =	'bold 14px sans-serif';
-    ctx.textAlign =	'center';
-    ctx.textBaseline =	'middle';
-
-    const labelY =	-25;
-    const labelText =	(index +	1).toString();
-    const textWidth = ctx.measureText(labelText).width;
-
-    ctx.fillStyle =	isEditing ? '#FF9800' : '#2196F3';
-    ctx.fillRect(-(textWidth /	 2 +	 6), labelY -	 10, textWidth +	 12,	 20);
-    ctx.fillStyle =	'white';
-    ctx.fillText(labelText, 0, labelY);
-
+    enterMarkerFrame(ctx, x, y, mapScale, transform.rotation);
+    const top = drawFlag(ctx, color, flagScale);
+    drawPointNumber(ctx, (index + 1).toString(), top, color);
     ctx.restore();
   });
 }
 
 export function drawPendingPoint(ctx, pendingPoint, transform, imageWidth, imageHeight) {
   const { x, y } = toPixels(pendingPoint.u, pendingPoint.v, imageWidth, imageHeight);
-  ctx.fillStyle =	'rgba(255, 152, 0, 0.9)';
-  ctx.beginPath();
-  ctx.arc(x, y,	 15,	0, Math.PI *	 2);
-   ctx.fill();
-   ctx.strokeStyle =	'white';
-   ctx.lineWidth =	3;
-   ctx.stroke();
+  const rotation = Number.isFinite(transform?.rotation) ? transform.rotation : 0;
 
-   ctx.strokeStyle =	'rgba(255, 152, 0, 0.5)';
-  ctx.lineWidth =	2;
+  enterMarkerFrame(ctx, x, y, markerScale(transform?.scale), rotation);
+  drawFlag(ctx, POINT_COLOR_PENDING);
+
+  // Ring on the ground the new point will be planted in.
+  ctx.strokeStyle = 'rgba(255, 152, 0, 0.5)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(x, y,	 20,	0, Math.PI *	 2);
+  ctx.arc(0, 0, POINT_FLAG.width * 0.55, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.restore();
 }
 
 /**
