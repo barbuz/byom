@@ -76,7 +76,7 @@ describe('drawReferencePoints', () => {
     expect(ctx.calls).toHaveLength(0);
   });
 
-  it('plants a flag at the point with its number badge above it', () => {
+  it('plants a flag at the point with its number inside the flag', () => {
     const ctx = fakeCtx();
     drawPoints(ctx, [{ id: 1, u: 0.1, v: 0.2 }]);
 
@@ -92,8 +92,13 @@ describe('drawReferencePoints', () => {
     const labels = ctx.calls.filter((c) => c[0] === 'fillText');
     expect(labels).toHaveLength(1);
     expect(labels[0][1][0]).toBe('1');
-    // The number sits above the flag's top edge.
-    expect(labels[0][1][2]).toBeLessThan(-POINT_FLAG.poleHeight);
+    // The number sits inside the pennant: right of the pole, below the flag's
+    // top edge and above its bottom edge.
+    const [, labelX, labelY] = labels[0][1];
+    expect(labelX).toBeGreaterThan(0);
+    expect(labelX).toBeLessThan(POINT_FLAG.width);
+    expect(labelY).toBeGreaterThan(-POINT_FLAG.poleHeight);
+    expect(labelY).toBeLessThan(-POINT_FLAG.poleHeight + POINT_FLAG.height);
   });
 
   it('scales the flag up for hover and editing', () => {
@@ -109,7 +114,8 @@ describe('drawReferencePoints', () => {
     const editing = fakeCtx();
     drawPoints(editing, [{ id: 1, u: 0.1, v: 0.2 }], { editingPointId: 1 });
 
-    expect(fillStyleBefore(editing, 'fillRect')).not.toBe(fillStyleBefore(normal, 'fillRect'));
+    // The number is painted white last, so compare the pennant's fill instead.
+    expect(fillStyleBefore(editing, 'fill')).not.toBe(fillStyleBefore(normal, 'fill'));
     expect(editing.fs).toBe('white');
   });
 

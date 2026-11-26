@@ -79,20 +79,23 @@ function insidePole(x, y) {
 }
 
 // The pennant's right edge is the flipped-b bowl curve, which is monotonic in
-// y, so its x at a given height is a quadratic root.
+// y, so its x at a given height is a quadratic root. It starts at `flatTo`,
+// where the flag's straight top edge ends.
 function pennantRightEdge(y) {
   const { pennant } = MARK;
-  const a = pennant.top - 2 * pennant.controlY + pennant.bottom;
-  const b = 2 * (pennant.controlY - pennant.top);
+  const startX = pennant.flatTo;
+  const controlX = pennant.left + pennant.control.x * (pennant.tipX - pennant.left);
+  const controlY = pennant.top + pennant.control.y * (pennant.bottom - pennant.top);
+  const a = pennant.top - 2 * controlY + pennant.bottom;
+  const b = 2 * (controlY - pennant.top);
   const c = pennant.top - y;
   const t = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a);
-  return 2 * t * (1 - t) * pennant.controlX + t * t * pennant.tipX;
+  return (1 - t) * (1 - t) * startX + 2 * t * (1 - t) * controlX + t * t * pennant.tipX;
 }
 
 function insidePennant(x, y) {
-  const { pennant, pole } = MARK;
+  const { pennant } = MARK;
   if (x < pennant.left || x > pennant.tipX || y < pennant.top || y > pennant.bottom) return false;
-  if (x <= pole.width / 2) return true; // the pole covers the hoist
   return x <= pennantRightEdge(y);
 }
 

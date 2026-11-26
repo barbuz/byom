@@ -59,26 +59,33 @@ function drawAccuracyRing(ctx, point, geoTransform, imageWidth, imageHeight) {
  * Draw the mark with its foot at the current origin: a flagpole whose bowl is
  * the pennant. Callers have already translated to the point, cancelled the map
  * scale and counter-rotated, so the flag is upright and the same size at any
- * zoom. Returns the flag's top edge, where the number badge attaches.
+ * zoom. Returns the flag's box, which the number is placed inside.
  */
 function drawFlag(ctx, color, scale = 1) {
   const poleHeight = POINT_FLAG.poleHeight * scale;
   const poleWidth = POINT_FLAG.poleWidth * scale;
   const flagWidth = POINT_FLAG.width * scale;
   const flagHeight = POINT_FLAG.height * scale;
+  const left = -poleWidth / 2;
+  const flatTo = poleWidth / 2;
   const top = -poleHeight;
-  const mid = top + flagHeight;
+  const bottom = top + flagHeight;
+  // The pole's round cap ends level with the flag's top edge: on the
+  // centreline the cap reaches `top` when the stroke stops half a width short,
+  // so no pole end pokes out above the flag.
+  const poleEnd = top + poleWidth / 2;
 
   const pennant = () => {
     ctx.beginPath();
-    ctx.moveTo(0, top);
+    ctx.moveTo(left, top);
+    ctx.lineTo(flatTo, top);
     ctx.quadraticCurveTo(
-      flagWidth * PENNANT_CONTROL.x,
+      left + flagWidth * PENNANT_CONTROL.x,
       top + flagHeight * PENNANT_CONTROL.y,
       flagWidth,
-      mid,
+      bottom,
     );
-    ctx.lineTo(0, mid);
+    ctx.lineTo(left, bottom);
     ctx.closePath();
   };
 
@@ -94,7 +101,7 @@ function drawFlag(ctx, color, scale = 1) {
   ctx.stroke();
   ctx.beginPath();
   ctx.moveTo(0, 0);
-  ctx.lineTo(0, top);
+  ctx.lineTo(0, poleEnd);
   ctx.lineWidth = poleWidth + POINT_FLAG.halo * 2;
   ctx.stroke();
 
@@ -105,7 +112,7 @@ function drawFlag(ctx, color, scale = 1) {
   ctx.lineWidth = poleWidth;
   ctx.beginPath();
   ctx.moveTo(0, 0);
-  ctx.lineTo(0, top);
+  ctx.lineTo(0, poleEnd);
   ctx.stroke();
 
   // A knob at the foot makes the planted location explicit.
@@ -118,23 +125,22 @@ function drawFlag(ctx, color, scale = 1) {
   ctx.stroke();
 
   ctx.restore();
-  return top;
+  return { left, top, width: flagWidth, height: flagHeight };
 }
 
-function drawPointNumber(ctx, label, flagTop, color) {
-  ctx.font = 'bold 12px sans-serif';
+/** The point's number, set inside the pennant. */
+function drawPointLabel(ctx, label, box) {
+  // Three digits need a smaller face to stay inside the sail.
+  const size = label.length > 2 ? 9 : 11;
+  ctx.font = `bold ${size}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
-
-  const width = ctx.measureText(label).width + 10;
-  const height = POINT_FLAG.badgeHeight;
-  // The badge straddles the pole's top so it reads as a plate on the pole.
-  const centerY = flagTop - POINT_FLAG.badgeCentreUp;
-
-  ctx.fillStyle = color;
-  ctx.fillRect(-width / 2, centerY - height / 2, width, height);
   ctx.fillStyle = 'white';
-  ctx.fillText(label, 0, centerY);
+  ctx.fillText(
+    label,
+    box.left + box.width * POINT_FLAG.labelX,
+    box.top + box.height * POINT_FLAG.labelY,
+  );
 }
 
 /** Translate to the point and undo the map transform, leaving screen pixels. */
@@ -174,8 +180,8 @@ export function drawReferencePoints(ctx, points, transform, imageWidth, imageHei
     const flagScale = isHovered || isEditing ? POINT_FLAG.hoverScale : 1;
 
     enterMarkerFrame(ctx, x, y, mapScale, transform.rotation);
-    const top = drawFlag(ctx, color, flagScale);
-    drawPointNumber(ctx, (index + 1).toString(), top, color);
+    const box = drawFlag(ctx, color, flagScale);
+    drawPointLabel(ctx, (index + 1).toString(), box);
     ctx.restore();
   });
 }
