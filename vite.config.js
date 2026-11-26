@@ -83,7 +83,7 @@ function publicAssetVersioning() {
 
     transformIndexHtml(html) {
       return html.replace(
-        /href="(\/byom\/|\/)?(favicon\.svg|manifest\.json)"/g,
+        /href="(\/byom\/|\/)?(favicon\.svg|apple-touch-icon\.png|manifest\.json)"/g,
         (_match, prefix = '', file) => `href="${withVersion(`${prefix}${file}`)}"`,
       );
     },
