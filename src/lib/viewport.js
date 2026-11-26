@@ -2,6 +2,7 @@
  * Pure viewport math for MapViewer. All functions are side-effect free
  * so they can be tested without mounting the full viewport.
  */
+import { FLAG_HIT } from './flagMark.js';
 const cos = (r) => Math.cos(r);
 const sin = (r) => Math.sin(r);
 
@@ -72,8 +73,14 @@ export function centerOnImagePoint(imageX, imageY, transform, imageWidth, imageH
 }
 
 /**
- * Return the index of the reference point whose screen position is within
- * `clickRadius` of (screenX,screenY.), or -1 if none.
+ * Return the index of the reference point a tap at (screenX,screenY) targets,
+ * or -1 if none.
+ *
+ * A point's flag is drawn upright in screen space with its foot on the point,
+ * so its body is a second hit target: the pole rises above the foot and the
+ * pennant flies to the right. Without it a tap on the flag would start a new
+ * point instead of editing the one it belongs to. An overlap resolves to the
+ * first point in array order.
  */
 export function getPointAtScreen(
   screenX,
@@ -88,7 +95,14 @@ export function getPointAtScreen(
   for (let i =  0; i < referencePoints.length; i++) {
     const point = referencePoints[i];
     const screen = imageToScreen(point.imageX, point.imageY, transform, imageWidth, imageHeight);
-    if (screen && Math.hypot(screenX - screen.x, screenY - screen.y) <= clickRadius) {
+    if (!screen) continue;
+
+    const dx = screenX - screen.x;
+    const dy = screenY - screen.y;
+    const onFlag = dx >= -FLAG_HIT.left && dx <= FLAG_HIT.right
+      && dy >= -FLAG_HIT.up && dy <= FLAG_HIT.down;
+
+    if (onFlag || Math.hypot(dx, dy) <= clickRadius) {
       return i;
     }
   }

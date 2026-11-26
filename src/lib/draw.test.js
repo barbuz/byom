@@ -8,9 +8,10 @@ import {
 } from './draw.js';
 import { calculateTransform } from './transforms.js';
 import { buildGraticule } from './grid.js';
+import { POINT_FLAG } from './flagMark.js';
 
 function fakeCtx() {
-  return { calls: [], translate(...a) { this.calls.push(['translate', a]); }, rotate(...a) { this.calls.push(['rotate', a]); }, scale(...a) { this.calls.push(['scale', a]); }, transform(...a) { this.calls.push(['transform', a]); }, arc(...a) { this.calls.push(['arc', a]); }, fill() { this.calls.push(['fill']); }, stroke() { this.calls.push(['stroke']); }, beginPath() { this.calls.push(['beginPath']); }, rect(...a) { this.calls.push(['rect', a]); }, clip() { this.calls.push(['clip']); }, moveTo(...a) { this.calls.push(['moveTo', a]); }, lineTo(...a) { this.calls.push(['lineTo', a]); }, bezierCurveTo(...a) { this.calls.push(['bezierCurveTo', a]); }, strokeText(...a) { this.calls.push(['strokeText', a]); }, setLineDash(...a) { this.calls.push(['setLineDash', a]); }, save() { this.calls.push(['save']); }, restore() { this.calls.push(['restore']); }, measureText(t) { this.calls.push(['measureText', t]); return { width: 30 }; }, fillRect(...a) { this.calls.push(['fillRect', a]); }, fillText(...a) { this.calls.push(['fillText', a]); }, set fillStyle(v) { this.fs = v; this.calls.push(['fillStyle', v]); }, get fillStyle() { return this.fs; }, set strokeStyle(v) { this.ss = v; this.calls.push(['strokeStyle', v]); }, get strokeStyle() { return this.ss; }, set lineWidth(v) { this.lw = v; }, get lineWidth() { return this.lw; }, set font(v) { this.fn = v; }, get font() { return this.fn; }, set textAlign(v) { this.ta = v; }, get textAlign() { return this.ta; }, set textBaseline(v) { this.tb = v; }, get textBaseline() { return this.tb; } };
+  return { calls: [], translate(...a) { this.calls.push(['translate', a]); }, rotate(...a) { this.calls.push(['rotate', a]); }, scale(...a) { this.calls.push(['scale', a]); }, transform(...a) { this.calls.push(['transform', a]); }, arc(...a) { this.calls.push(['arc', a]); }, fill() { this.calls.push(['fill']); }, stroke() { this.calls.push(['stroke']); }, beginPath() { this.calls.push(['beginPath']); }, rect(...a) { this.calls.push(['rect', a]); }, clip() { this.calls.push(['clip']); }, moveTo(...a) { this.calls.push(['moveTo', a]); }, lineTo(...a) { this.calls.push(['lineTo', a]); }, bezierCurveTo(...a) { this.calls.push(['bezierCurveTo', a]); }, quadraticCurveTo(...a) { this.calls.push(['quadraticCurveTo', a]); }, closePath() { this.calls.push(['closePath']); }, strokeText(...a) { this.calls.push(['strokeText', a]); }, setLineDash(...a) { this.calls.push(['setLineDash', a]); }, save() { this.calls.push(['save']); }, restore() { this.calls.push(['restore']); }, measureText(t) { this.calls.push(['measureText', t]); return { width: 30 }; }, fillRect(...a) { this.calls.push(['fillRect', a]); }, fillText(...a) { this.calls.push(['fillText', a]); }, set fillStyle(v) { this.fs = v; this.calls.push(['fillStyle', v]); }, get fillStyle() { return this.fs; }, set strokeStyle(v) { this.ss = v; this.calls.push(['strokeStyle', v]); }, get strokeStyle() { return this.ss; }, set lineWidth(v) { this.lw = v; }, get lineWidth() { return this.lw; }, set font(v) { this.fn = v; }, get font() { return this.fn; }, set textAlign(v) { this.ta = v; }, get textAlign() { return this.ta; }, set textBaseline(v) { this.tb = v; }, get textBaseline() { return this.tb; } };
 }
 
 describe('applyImageTransform', () => {
@@ -27,70 +28,143 @@ describe('applyImageTransform', () => {
 });
 
 describe('drawPendingPoint', () => {
-  it('draws two concentric circles at the pending point', () => {
+  it('plants a flag at the pending point and rings the ground beneath it', () => {
     const ctx = fakeCtx();
-    drawPendingPoint(ctx, { u: 0.5, v: 0.6 }, { scale:  1, rotation:   0, translateX:  0, translateY:  0 },  100,  80);
-    expect(ctx.calls.map(c => c[0]).filter(n => n === 'arc').length).toBe(2);
-    expect(ctx.calls.filter(c => c[0] === 'arc')[0][1].slice(0,  2)).toEqual([50, 60]);
-    expect(ctx.calls.filter(c => c[0] === 'arc')[1][1].slice(0,  2)).toEqual([50, 60]);
+    drawPendingPoint(ctx, { u: 0.5, v: 0.6 }, { scale: 1, rotation: 0.3, translateX: 0, translateY: 0 }, 100, 80);
+
+    // The flag's foot is at the point, in image pixels.
+    expect(ctx.calls.filter((c) => c[0] === 'translate')[0][1]).toEqual([50, 60]);
+    // Counter-rotated and scale-cancelled, so the flag is upright and keeps a
+    // constant screen size while the map rotates and zooms.
+    expect(ctx.calls.filter((c) => c[0] === 'rotate')[0][1]).toEqual([-0.3]);
+    expect(ctx.calls.filter((c) => c[0] === 'scale')[0][1]).toEqual([1, 1]);
+
+    expect(ctx.calls.some((c) => c[0] === 'quadraticCurveTo')).toBe(true);
+
+    // One ring on the ground the new point will be planted in; the pole's own
+    // round cap marks the foot.
+    const arcs = ctx.calls.filter((c) => c[0] === 'arc');
+    expect(arcs).toHaveLength(1);
+    expect(arcs[0][1].slice(0, 2)).toEqual([0, 0]);
+    expect(arcs[0][1][2]).toBeGreaterThan(0);
     expect(ctx.lw).toBe(2);
-   });
+  });
 });
 
 describe('drawReferencePoints', () => {
+  const view = { scale: 2, rotation: 0.4, translateX: 0, translateY: 0 };
+
+  function drawPoints(ctx, points, options = {}) {
+    drawReferencePoints(ctx, points, view, 100, 80, { showingPoints: true, ...options });
+  }
+
+  function fillStyleBefore(ctx, method) {
+    const index = ctx.calls.findIndex((c) => c[0] === method);
+    return ctx.calls.slice(0, index).filter((c) => c[0] === 'fillStyle').pop()[1];
+  }
+
+  /** The bowl's tip, which scales with the flag. */
+  function flagTip(options) {
+    const ctx = fakeCtx();
+    drawPoints(ctx, [{ id: 1, u: 0.1, v: 0.2 }], options);
+    return ctx.calls.filter((c) => c[0] === 'quadraticCurveTo')[0][1][2];
+  }
+
   it('skips hidden points (showingPoints=false, no editing)', () => {
     const ctx = fakeCtx();
-    drawReferencePoints(ctx, [{ id:  1, u: 0.1, v: 0.1 }], { scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80, {});
+    drawReferencePoints(ctx, [{ id: 1, u: 0.1, v: 0.1 }], view, 100, 80, {});
     expect(ctx.calls).toHaveLength(0);
-   });
+  });
 
- it('draws a visible point with fill, stroke,and counter-rotated label', () => {
+  it('plants a flag at the point with its number inside the flag', () => {
     const ctx = fakeCtx();
-    drawReferencePoints(ctx, [{ id:  1, u: 0.1, v: 0.1 }], { scale:  2, rotation:  0, translateX:  0, translateY:  0 },  100,  80, { showingPoints:  true });
-    expect(ctx.calls.map(c => c[0]).filter(n => n === 'arc').length).toBeGreaterThanOrEqual(1);
-    const labels = ctx.calls.filter(c => c[0] === 'fillText');
+    drawPoints(ctx, [{ id: 1, u: 0.1, v: 0.2 }]);
+
+    // Foot at the point's image pixel; the flag flies above it, upright.
+    expect(ctx.calls.filter((c) => c[0] === 'translate')[0][1]).toEqual([10, 20]);
+    expect(ctx.calls.filter((c) => c[0] === 'scale')[0][1][0]).toBeCloseTo(0.5);
+    expect(ctx.calls.filter((c) => c[0] === 'rotate')[0][1][0]).toBeCloseTo(-0.4);
+
+    // The pole is stroked from half a width below the origin, so its round
+    // bottom cap ends exactly on the point, up to where the cap hides under
+    // the bowl.
+    const pole = ctx.calls.find((c) => c[0] === 'moveTo' && c[1][0] === 0);
+    expect(pole[1][1]).toBeCloseTo(-POINT_FLAG.poleWidth / 2);
+    expect(ctx.calls.some((c) => c[0] === 'quadraticCurveTo')).toBe(true);
+
+    const labels = ctx.calls.filter((c) => c[0] === 'fillText');
     expect(labels).toHaveLength(1);
     expect(labels[0][1][0]).toBe('1');
-    const scales = ctx.calls.filter(c => c[0] === 'scale');
-    expect(scales[0][1][0]).toBeCloseTo(0.5);
-   });
+    // The number sits inside the pennant: right of the pole, below the flag's
+    // top edge and above its bottom edge.
+    const { pennant } = POINT_FLAG;
+    const [, labelX, labelY] = labels[0][1];
+    expect(labelX).toBeGreaterThan(pennant.left);
+    expect(labelX).toBeLessThan(pennant.left + pennant.width);
+    expect(labelY).toBeGreaterThan(pennant.top);
+    expect(labelY).toBeLessThan(pennant.top + pennant.height);
+  });
 
- it('uses editing color when editingPointId matches', () => {
-    const ctx = fakeCtx();
-    drawReferencePoints(ctx, [{ id:  1, u: 0.1, v: 0.1 }], { scale:  1, rotation:  0, translateX:  0, translateY:  0 },  100,  80, { showingPoints:  1, editingPointId:  1 });
-    expect(ctx.fs).toBe('white');
-   });
+  it('scales the flag up for hover and editing', () => {
+    const tip = POINT_FLAG.pennant.left + POINT_FLAG.pennant.width;
+    expect(flagTip({})).toBeCloseTo(tip);
+    expect(flagTip({ hoverPointIndex: 0 })).toBeCloseTo(tip * POINT_FLAG.hoverScale);
+    expect(flagTip({ editingPointId: 1 })).toBeCloseTo(tip * POINT_FLAG.hoverScale);
+  });
 
- it('draws an accuracy ring when the point has accuracy and a geo transform', () => {
-    const ctx = fakeCtx();
-    drawReferencePoints(
-      ctx,
-      [{ id:  1, u: 0.1, v: 0.1, lon:  1, lat:  2, accuracy:  100 }],
-      { scale:  2, rotation:  0.5, translateX:  0, translateY:  0 },
-      100,
-      80,
-      { showingPoints:  true, geoTransform: { m: [10000, 0, 0, 0, 10000, 0, 0, 0, 1], type: 'similarity', lon0: 1, lat0: 2 } }
-    );
-    const arcs = ctx.calls.filter(c => c[0] === 'arc');
-    expect(arcs.length).toBeGreaterThanOrEqual(2);
-    expect(arcs[0][1][2]).toBeGreaterThan(0);
-    expect(arcs[0][1][2]).toBeLessThan(arcs[1][1][2]);
-   });
+  it('shrinks the number for multi-digit labels instead of widening the flag', () => {
+    const fontFor = (count) => {
+      const ctx = fakeCtx();
+      const points = Array.from({ length: count }, (_, i) => ({ id: i + 1, u: 0.1, v: 0.2 }));
+      drawPoints(ctx, points);
+      return Number(ctx.fn.match(/([\d.]+)px/)[1]);
+    };
+
+    expect(fontFor(10)).toBeLessThan(fontFor(1));
+    expect(fontFor(100)).toBeLessThan(fontFor(10));
+  });
+
+  it('uses the editing color when editingPointId matches', () => {
+    const normal = fakeCtx();
+    drawPoints(normal, [{ id: 1, u: 0.1, v: 0.2 }]);
+
+    const editing = fakeCtx();
+    drawPoints(editing, [{ id: 1, u: 0.1, v: 0.2 }], { editingPointId: 1 });
+
+    // The number is painted white last, so compare the pennant's fill instead.
+    expect(fillStyleBefore(editing, 'fill')).not.toBe(fillStyleBefore(normal, 'fill'));
+    expect(editing.fs).toBe('white');
+  });
+
+  it('draws the accuracy ring around the point, scaled by its ground radius', () => {
+    const ringFor = (accuracy) => {
+      const ctx = fakeCtx();
+      drawPoints(
+        ctx,
+        [{ id: 1, u: 0.1, v: 0.2, lon: 1, lat: 2, accuracy }],
+        { geoTransform: { m: [10000, 0, 0, 0, 10000, 0, 0, 0, 1], type: 'similarity', lon0: 1, lat0: 2 } },
+      );
+      return ctx.calls.filter((c) => c[0] === 'arc')[0];
+    };
+
+    const small = ringFor(100);
+    const large = ringFor(1000);
+    expect(small[1].slice(0, 2)).toEqual([10, 20]);
+    expect(small[1][2]).toBeGreaterThan(0);
+    expect(large[1][2]).toBeGreaterThan(small[1][2]);
+  });
 
   it('draws the accuracy ring with translucent rgba colors', () => {
     const ctx = fakeCtx();
-    drawReferencePoints(
+    drawPoints(
       ctx,
-      [{ id: 1, u: 0.1, v: 0.1, lon: 1, lat: 2, accuracy: 100 }],
-      { scale: 2, rotation: 0.5, translateX: 0, translateY: 0 },
-      100,
-      80,
-      { showingPoints: true, geoTransform: { m: [10000, 0, 0, 0, 10000, 0, 0, 0, 1], type: 'similarity', lon0: 1, lat0: 2 } }
+      [{ id: 1, u: 0.1, v: 0.2, lon: 1, lat: 2, accuracy: 100 }],
+      { geoTransform: { m: [10000, 0, 0, 0, 10000, 0, 0, 0, 1], type: 'similarity', lon0: 1, lat0: 2 } },
     );
-    const fs = ctx.calls.filter(c => c[0] === 'fillStyle');
-    const ss = ctx.calls.filter(c => c[0] === 'strokeStyle');
-    expect(fs[0][1]).toMatch(/^rgba\(33,\s*150,\s*243,\s*0\.1\)$/);
-    expect(ss[0][1]).toMatch(/^rgba\(33,\s*150,\s*243,\s*0\.35\)$/);
+    const fs = ctx.calls.filter((c) => c[0] === 'fillStyle');
+    const ss = ctx.calls.filter((c) => c[0] === 'strokeStyle');
+    expect(fs[0][1]).toBe('rgba(29, 78, 216, 0.1)');
+    expect(ss[0][1]).toBe('rgba(29, 78, 216, 0.35)');
   });
 });
 

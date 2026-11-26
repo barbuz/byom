@@ -1,9 +1,9 @@
 <script>
   import { getMap, getReferencePoints } from './lib/db.js';
-  import { createGeoreference, geoToUV, geoDistanceToUV, imageDivisor } from './lib/transforms.js';
+  import { createGeoreference, geoToUV, imageDivisor } from './lib/transforms.js';
   import { screenToImage, getPointAtScreen, pinchZoomTransform, centerOnImagePoint } from './lib/viewport.js';
   import { buildGraticule } from './lib/grid.js';
-  import { drawGraticule } from './lib/draw.js';
+  import { drawGraticule, drawPendingPoint, drawReferencePoints } from './lib/draw.js';
   import { buildMapArchive, suggestedArchiveName, ARCHIVE_MIME } from './lib/mapArchive.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
   import Icon from './lib/Icon.svelte';
@@ -224,98 +224,19 @@
     ctx.scale(transform.scale, transform.scale);
     ctx.translate(-imageWidth / 2, -imageHeight / 2);
 
-    referencePoints.forEach((point, index) => {
-      const isHovered = hoverPointIndex === index;
-      const isEditing = editingPoint && editingPoint.id === point.id;
-      const { imageX, imageY } = uvToPixels(point);
-      
-      if (showingPoints || isEditing) {
-        // Draw accuracy ring if the point was captured with GPS accuracy
-        if (point.accuracy && geoTransform) {
-          const accuracyRadius = geoDistanceToUV(
-            point.lon,
-            point.lat,
-            point.accuracy,
-            geoTransform
-          ) * imageDivisor(imageWidth, imageHeight);
-          ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
-          ctx.strokeStyle = 'rgba(33, 150, 243, 0.35)';
-          ctx.lineWidth = 2;
-          ctx.beginPath();
-          ctx.arc(imageX, imageY, accuracyRadius, 0, Math.PI * 2);
-          ctx.fill();
-          ctx.stroke();
-        }
-
-        ctx.fillStyle = isEditing ? 'rgba(255, 152, 0, 0.9)' : isHovered ? 'rgba(33, 150, 243, 0.9)' : 'rgba(33, 150, 243, 0.7)';
-        ctx.beginPath();
-        ctx.arc(imageX, imageY, isHovered || isEditing ? 12 : 8, 0, Math.PI * 2);
-        ctx.fill();
-        ctx.strokeStyle = 'white';
-        ctx.lineWidth = isEditing ? 3 : 2;
-        ctx.stroke();
-        
-        // Draw number label
-        ctx.save();
-        ctx.translate(imageX, imageY);
-        ctx.scale(1 / transform.scale, 1 / transform.scale);
-        ctx.rotate(-transform.rotation);
-        
-        ctx.font = 'bold 14px sans-serif';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        
-        const labelY = -25;
-        const labelText = (index + 1).toString();
-        const textWidth = ctx.measureText(labelText).width;
-        
-        ctx.fillStyle = isEditing ? '#FF9800' : '#2196F3';
-        ctx.fillRect(-(textWidth / 2 + 6), labelY - 10, textWidth + 12, 20);
-        
-        ctx.fillStyle = 'white';
-        ctx.fillText(labelText, 0, labelY);
-        
-        ctx.restore();
-      } else {
-        // ctx.fillStyle = 'rgba(33, 150, 243, 0.7)';
-        // ctx.beginPath();
-        // ctx.arc(point.imageX, point.imageY, 6, 0, Math.PI * 2);
-        // ctx.fill();
-        // ctx.strokeStyle = 'white';
-        // ctx.lineWidth = 2;
-        // ctx.stroke();
-      }
+    drawReferencePoints(ctx, referencePoints, transform, imageWidth, imageHeight, {
+      showingPoints,
+      editingPointId: editingPoint ? editingPoint.id : null,
+      hoverPointIndex,
+      geoTransform,
     });
-
-    ctx.restore();
 
     // Draw pending reference point
     if (pendingReferencePoint) {
-      const pending = uvToPixels(pendingReferencePoint);
-      ctx.save();
-      ctx.translate(transform.translateX, transform.translateY);
-      ctx.rotate(transform.rotation);
-      ctx.scale(transform.scale, transform.scale);
-      ctx.translate(-imageWidth / 2, -imageHeight / 2);
-
-      // Draw pending point marker
-      ctx.fillStyle = 'rgba(255, 152, 0, 0.9)';
-      ctx.beginPath();
-      ctx.arc(pending.imageX, pending.imageY, 15, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.strokeStyle = 'white';
-      ctx.lineWidth = 3;
-      ctx.stroke();
-
-      // Draw pulsing effect
-      ctx.strokeStyle = 'rgba(255, 152, 0, 0.5)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.arc(pending.imageX, pending.imageY, 20, 0, Math.PI * 2);
-      ctx.stroke();
-
-      ctx.restore();
+      drawPendingPoint(ctx, pendingReferencePoint, transform, imageWidth, imageHeight);
     }
+
+    ctx.restore();
 
     // Draw user position marker
     if (userPositionMarker) {

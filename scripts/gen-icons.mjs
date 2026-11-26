@@ -1,16 +1,25 @@
-// Generates the PWA icons from the app mark: a map sheet with a route and a
-// destination dot. Hand-rolled rasterizer + PNG encoder, so the repo carries no
-// image tooling and the icons cannot drift from the SVG.
+// Generates the app icon from the flag mark in src/lib/flagMark.js: the SVG
+// files and the PNG rasterisations, so the checked-in icons cannot drift from
+// the shape. Hand-rolled rasterizer + PNG encoder, so the repo carries no
+// image tooling.
 import { deflateSync } from 'node:zlib';
 import { writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import {
+  MARK,
+  MARK_ICON,
+  MARK_PENNANT_PATH,
+  MARK_POLE_PATH,
+  MARK_POLE_WIDTH,
+} from '../src/lib/flagMark.js';
 
 const outDir = resolve(dirname(fileURLToPath(import.meta.url)), '..', 'public');
 
-const BG = [250, 248, 243]; // #faf8f3
-const INK = [27, 26, 23]; // #1b1a17
-const ACCENT = [29, 78, 216]; // #1d4ed8
+const TILE = [29, 78, 216]; // #1d4ed8
+const FLAG = [250, 248, 243]; // #faf8f3
+const TILE_HEX = '#1d4ed8';
+const FLAG_HEX = '#faf8f3';
 
 function crc32(buf) {
   let crc = ~0;
@@ -57,14 +66,6 @@ function encodePng(size, pixels) {
   ]);
 }
 
-function sdRoundRect(px, py, cx, cy, hw, hh, r) {
-  const qx = Math.abs(px - cx) - (hw - r);
-  const qy = Math.abs(py - cy) - (hh - r);
-  const ax = Math.max(qx, 0);
-  const ay = Math.max(qy, 0);
-  return Math.hypot(ax, ay) + Math.min(Math.max(qx, qy), 0) - r;
-}
-
 function distanceToSegment(px, py, ax, ay, bx, by) {
   const dx = bx - ax;
   const dy = by - ay;
@@ -72,28 +73,39 @@ function distanceToSegment(px, py, ax, ay, bx, by) {
   return Math.hypot(px - (ax + t * dx), py - (ay + t * dy));
 }
 
-const ROUTE = [
-  [0.28125, 0.65625],
-  [0.421875, 0.5],
-  [0.53125, 0.59375],
-  [0.703125, 0.375],
-];
-const DOT = [0.703125, 0.375];
-const STROKE = 0.03125;
+function insidePole(x, y) {
+  const { pole } = MARK;
+  return distanceToSegment(x, y, pole.x, pole.end, pole.x, pole.base) <= pole.width / 2;
+}
 
-function sample(x, y) {
-  const sheet = sdRoundRect(x, y, 0.5, 0.5, 0.3125, 0.28125, 0.0625);
-  if (Math.abs(sheet) <= STROKE) return INK;
+// The pennant's right edge is two mirrored curves meeting at the tip: the b's
+// bowl above it, its mirror below. Each is monotonic in y, so the x at a given
+// height is a quadratic root.
+function pennantRightEdge(y) {
+  const { pennant } = MARK;
+  const upper = y <= pennant.tipY;
+  const y0 = upper ? pennant.top : pennant.bottom;
+  const controlY = upper
+    ? pennant.top + (pennant.tipY - pennant.top) * pennant.control.y
+    : pennant.bottom - (pennant.bottom - pennant.tipY) * pennant.control.y;
+  const controlX = pennant.left + pennant.control.x * (pennant.tipX - pennant.left);
+  const a = y0 - 2 * controlY + pennant.tipY;
+  const b = 2 * (controlY - y0);
+  const c = y0 - y;
+  const t = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a);
+  return (1 - t) ** 2 * pennant.left + 2 * t * (1 - t) * controlX + t ** 2 * pennant.tipX;
+}
 
-  if (Math.hypot(x - DOT[0], y - DOT[1]) <= 0.0625) return ACCENT;
+function insidePennant(x, y) {
+  const { pennant } = MARK;
+  if (x < pennant.left || x > pennant.tipX || y < pennant.top || y > pennant.bottom) return false;
+  return x <= pennantRightEdge(y);
+}
 
-  for (let i = 0; i < ROUTE.length - 1; i += 1) {
-    const [ax, ay] = ROUTE[i];
-    const [bx, by] = ROUTE[i + 1];
-    if (distanceToSegment(x, y, ax, ay, bx, by) <= STROKE) return ACCENT;
-  }
-
-  return BG;
+function sample(u, v) {
+  const x = (u * MARK_ICON.size - MARK_ICON.x) / MARK_ICON.scale;
+  const y = (v * MARK_ICON.size - MARK_ICON.y) / MARK_ICON.scale;
+  return insidePole(x, y) || insidePennant(x, y) ? FLAG : TILE;
 }
 
 function render(size) {
@@ -119,6 +131,26 @@ function render(size) {
     }
   }
   return pixels;
+}
+
+const round = (value) => Number(value.toFixed(4));
+
+function iconSvg(px) {
+  return [
+    `<svg width="${px}" height="${px}" viewBox="0 0 ${MARK_ICON.size} ${MARK_ICON.size}" xmlns="http://www.w3.org/2000/svg">`,
+    `  <rect width="${MARK_ICON.size}" height="${MARK_ICON.size}" rx="${MARK_ICON.radius}" fill="${TILE_HEX}"/>`,
+    `  <g transform="translate(${round(MARK_ICON.x)} ${round(MARK_ICON.y)}) scale(${round(MARK_ICON.scale)})">`,
+    `    <path d="${MARK_PENNANT_PATH}" fill="${FLAG_HEX}"/>`,
+    `    <path d="${MARK_POLE_PATH}" fill="none" stroke="${FLAG_HEX}" stroke-width="${MARK_POLE_WIDTH}" stroke-linecap="round"/>`,
+    '  </g>',
+    '</svg>',
+    '',
+  ].join('\n');
+}
+
+for (const [name, px] of [['favicon.svg', 64], ['icon-192.svg', 192], ['icon-512.svg', 512]]) {
+  writeFileSync(resolve(outDir, name), iconSvg(px));
+  console.log('wrote', name);
 }
 
 for (const size of [192, 512]) {

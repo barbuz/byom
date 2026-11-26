@@ -1,5 +1,6 @@
 import { geoToUV, geoDistanceToUV, imageDivisor } from './transforms.js';
 import { pickGridStepForScale, visibleLines } from './grid.js';
+import { MARK, MARK_BOUNDS, POINT_FLAG } from './flagMark.js';
 
 // The user marker is a screen-space overlay: its radius is in CSS pixels and
 // must not grow with the map. The accuracy ring, however, is a ground distance
@@ -13,6 +14,12 @@ const GRID_LINE_WIDTH = 1;
 const GRID_LABEL_FONT = '11px sans-serif';
 const GRID_LABEL_COLOR = 'rgba(255, 255, 255, 0.85)';
 const GRID_LABEL_HALO = 'rgba(0, 0, 0, 0.7)';
+
+// Reference-point flags: the accent marks a placed point, the warning orange
+// one being edited or dropped.
+const POINT_COLOR = '#1d4ed8';
+const POINT_COLOR_HOVER = '#2563eb';
+const POINT_COLOR_PENDING = '#ff9800';
 
 // Scale the current transform about a fixed point, so a marker drawn afterwards
 // stays centered while its radius changes in screen space. Expressed as one
@@ -39,8 +46,8 @@ function drawAccuracyRing(ctx, point, geoTransform, imageWidth, imageHeight) {
   const accuracyRadius = geoDistanceToUV(point.lon, point.lat, point.accuracy, geoTransform)
     * imageDivisor(imageWidth, imageHeight);
   const { x, y } = toPixels(point.u, point.v, imageWidth, imageHeight);
-  ctx.fillStyle = 'rgba(33, 150, 243, 0.1)';
-  ctx.strokeStyle = 'rgba(33, 150, 243, 0.35)';
+  ctx.fillStyle = 'rgba(29, 78, 216, 0.1)';
+  ctx.strokeStyle = 'rgba(29, 78, 216, 0.35)';
   ctx.lineWidth = 2;
   ctx.beginPath();
   ctx.arc(x, y, accuracyRadius, 0, Math.PI * 2);
@@ -48,8 +55,122 @@ function drawAccuracyRing(ctx, point, geoTransform, imageWidth, imageHeight) {
   ctx.stroke();
 }
 
-export function drawReferencePoints(ctx, points, transform, imageWidth, imageHeight, options) {
-  const { showingPoints = false, editingPointId = null, hoverPointIndex = -1, scale = transform.scale, geoTransform = null } = { ...options };
+/** Screen y for a mark y, with the pole's foot on the current origin. */
+function markerY(markY, scale) {
+  return (markY - MARK_BOUNDS.maxY) * scale;
+}
+
+/** The pennant's outline in marker pixels, scaled about the foot. */
+function pennantPath(ctx, scale) {
+  const { pennant } = MARK;
+  const spanX = pennant.tipX - pennant.left;
+  const controlX = pennant.left + pennant.control.x * spanX;
+  const controlTopY = pennant.top + (pennant.tipY - pennant.top) * pennant.control.y;
+  const controlBottomY = pennant.bottom - (pennant.bottom - pennant.tipY) * pennant.control.y;
+  ctx.beginPath();
+  ctx.moveTo(pennant.left * scale, markerY(pennant.top, scale));
+  ctx.quadraticCurveTo(
+    controlX * scale,
+    markerY(controlTopY, scale),
+    pennant.tipX * scale,
+    markerY(pennant.tipY, scale),
+  );
+  ctx.quadraticCurveTo(
+    controlX * scale,
+    markerY(controlBottomY, scale),
+    pennant.left * scale,
+    markerY(pennant.bottom, scale),
+  );
+  ctx.closePath();
+}
+
+/**
+ * The pole, from the foot up to where its round cap hides under the bowl. The
+ * stroke's bottom cap reaches exactly the origin, so the foot is the point.
+ */
+function polePath(ctx, scale) {
+  ctx.beginPath();
+  ctx.moveTo(0, markerY(MARK.pole.base, scale));
+  ctx.lineTo(0, markerY(MARK.pole.end, scale));
+}
+
+/**
+ * Draw the mark with its foot at the current origin: a flagpole carrying the
+ * pennant. Callers have already translated to the point, cancelled the map
+ * scale and counter-rotated, so the flag is upright and the same size at any
+ * zoom. It is the mark's own shape at `POINT_FLAG.scale`, not a redrawn
+ * variant. Returns the pennant's box, which the number is placed inside.
+ */
+function drawFlag(ctx, color, scale = 1) {
+  const s = POINT_FLAG.scale * scale;
+
+  ctx.save();
+  ctx.lineJoin = 'round';
+  ctx.lineCap = 'round';
+
+  // Stroke a white halo first; the fills painted over it leave only the rim,
+  // which keeps the flag readable over dark map features.
+  ctx.strokeStyle = 'white';
+  ctx.lineWidth = POINT_FLAG.halo * 2;
+  pennantPath(ctx, s);
+  ctx.stroke();
+  ctx.lineWidth = MARK.pole.width * s + POINT_FLAG.halo * 2;
+  polePath(ctx, s);
+  ctx.stroke();
+
+  ctx.fillStyle = color;
+  pennantPath(ctx, s);
+  ctx.fill();
+  ctx.strokeStyle = color;
+  ctx.lineWidth = MARK.pole.width * s;
+  polePath(ctx, s);
+  ctx.stroke();
+
+  ctx.restore();
+  return {
+    left: MARK.pennant.left * s,
+    top: markerY(MARK.pennant.top, s),
+    width: (MARK.pennant.tipX - MARK.pennant.left) * s,
+    height: (MARK.pennant.bottom - MARK.pennant.top) * s,
+  };
+}
+
+/** The point's number, set inside the pennant. */
+function drawPointLabel(ctx, label, box) {
+  // Numbers past 9 are rare, so the face shrinks instead of the flag growing.
+  const fit = label.length === 1 ? 0.4 : label.length === 2 ? 0.33 : 0.26;
+  ctx.font = `bold ${box.width * fit}px sans-serif`;
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  ctx.fillStyle = 'white';
+  ctx.fillText(
+    label,
+    box.left + box.width * POINT_FLAG.labelX,
+    box.top + box.height * POINT_FLAG.labelY,
+  );
+}
+
+/** Translate to the point and undo the map transform, leaving screen pixels. */
+function enterMarkerFrame(ctx, x, y, scale, rotation) {
+  ctx.save();
+  ctx.translate(x, y);
+  ctx.scale(1 / scale, 1 / scale);
+  ctx.rotate(-rotation);
+}
+
+function markerScale(scale) {
+  return Number.isFinite(scale) && scale !== 0 ? scale : 1;
+}
+
+export function drawReferencePoints(ctx, points, transform, imageWidth, imageHeight, options = {}) {
+  const {
+    showingPoints = false,
+    editingPointId = null,
+    hoverPointIndex = -1,
+    scale = transform.scale,
+    geoTransform = null,
+  } = options;
+  const mapScale = markerScale(scale);
 
   points.forEach((point, index) => {
     const isHovered = hoverPointIndex === index;
@@ -62,53 +183,30 @@ export function drawReferencePoints(ctx, points, transform, imageWidth, imageHei
     }
 
     const { x, y } = toPixels(point.u, point.v, imageWidth, imageHeight);
+    const color = isEditing ? POINT_COLOR_PENDING : isHovered ? POINT_COLOR_HOVER : POINT_COLOR;
+    const flagScale = isHovered || isEditing ? POINT_FLAG.hoverScale : 1;
 
-    ctx.fillStyle = isEditing ? 'rgba(255, 152, 0, 0.9)' : isHovered ? 'rgba(33, 150, 243, 0.9)' : 'rgba(33, 150, 243, 0.7)';
-    ctx.beginPath();
-    ctx.arc(x, y, isHovered ||	isEditing ?	 12 :	 8,	0, Math.PI *	 2);
-    ctx.fill();
-    ctx.strokeStyle =	'white';
-    ctx.lineWidth =	isEditing ?	 3 :	 2;
-    ctx.stroke();
-
-    // Draw number label (counter-rotated to screen space)
-    ctx.save();
-    ctx.translate(x, y);
-    ctx.scale(1 / scale,	1 / scale);
-    ctx.rotate(-transform.rotation);
-
-    ctx.font =	'bold 14px sans-serif';
-    ctx.textAlign =	'center';
-    ctx.textBaseline =	'middle';
-
-    const labelY =	-25;
-    const labelText =	(index +	1).toString();
-    const textWidth = ctx.measureText(labelText).width;
-
-    ctx.fillStyle =	isEditing ? '#FF9800' : '#2196F3';
-    ctx.fillRect(-(textWidth /	 2 +	 6), labelY -	 10, textWidth +	 12,	 20);
-    ctx.fillStyle =	'white';
-    ctx.fillText(labelText, 0, labelY);
-
+    enterMarkerFrame(ctx, x, y, mapScale, transform.rotation);
+    const box = drawFlag(ctx, color, flagScale);
+    drawPointLabel(ctx, (index + 1).toString(), box);
     ctx.restore();
   });
 }
 
 export function drawPendingPoint(ctx, pendingPoint, transform, imageWidth, imageHeight) {
   const { x, y } = toPixels(pendingPoint.u, pendingPoint.v, imageWidth, imageHeight);
-  ctx.fillStyle =	'rgba(255, 152, 0, 0.9)';
-  ctx.beginPath();
-  ctx.arc(x, y,	 15,	0, Math.PI *	 2);
-   ctx.fill();
-   ctx.strokeStyle =	'white';
-   ctx.lineWidth =	3;
-   ctx.stroke();
+  const rotation = Number.isFinite(transform?.rotation) ? transform.rotation : 0;
 
-   ctx.strokeStyle =	'rgba(255, 152, 0, 0.5)';
-  ctx.lineWidth =	2;
+  enterMarkerFrame(ctx, x, y, markerScale(transform?.scale), rotation);
+  drawFlag(ctx, POINT_COLOR_PENDING);
+
+  // Ring on the ground the new point will be planted in.
+  ctx.strokeStyle = 'rgba(255, 152, 0, 0.5)';
+  ctx.lineWidth = 2;
   ctx.beginPath();
-  ctx.arc(x, y,	 20,	0, Math.PI *	 2);
+  ctx.arc(0, 0, POINT_FLAG.width * 0.55, 0, Math.PI * 2);
   ctx.stroke();
+  ctx.restore();
 }
 
 /**

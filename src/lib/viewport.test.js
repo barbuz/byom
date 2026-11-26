@@ -6,6 +6,7 @@ import {
   pinchZoomTransform,
   centerOnImagePoint,
 } from './viewport.js';
+import { FLAG_HIT } from './flagMark.js';
 
 describe('screenToImage', () => {
   it('returns null when image dimensions are missing', () => {
@@ -59,6 +60,25 @@ describe('getPointAtScreen', () => {
     const transform = { scale:  2, rotation: Math.PI, translateX:  200, translateY:  150 };
     const points = [{ id:  1, imageX:  50, imageY:  50 }];
     expect(getPointAtScreen(200,  150, points, transform,  100,  100)).toBe(0);
+  });
+
+  it('targets the flag body above and right of the foot', () => {
+    // Image pixel (100,100) on a 200x200 canvas sits at screen (0,0).
+    const points = [{ id: 1, imageX: 100, imageY: 100 }];
+    const transform = { scale: 1, rotation: 0, translateX: 0, translateY: 0 };
+
+    // Far outside the 20 px foot radius, but inside the pennant.
+    const dx = FLAG_HIT.right - 1;
+    const dy = -FLAG_HIT.up + 2;
+    expect(Math.hypot(dx, dy)).toBeGreaterThan(20);
+    expect(getPointAtScreen(dx, dy, points, transform, 200, 200)).toBe(0);
+  });
+
+  it('is not a hit beyond the flag box', () => {
+    const points = [{ id: 1, imageX: 100, imageY: 100 }];
+    const transform = { scale: 1, rotation: 0, translateX: 0, translateY: 0 };
+    expect(getPointAtScreen(FLAG_HIT.right + 2, -FLAG_HIT.up - 2, points, transform, 200, 200)).toBe(-1);
+    expect(getPointAtScreen(0, FLAG_HIT.down + 20, points, transform, 200, 200)).toBe(-1);
   });
 });
 

@@ -1,17 +1,25 @@
 <script>
+  import { MARK_ICON, MARK_PENNANT_PATH, MARK_POLE_PATH, MARK_POLE_WIDTH } from './flagMark.js';
+
   let { size = 30 } = $props();
 </script>
 
-<svg width={size} height={size} viewBox="0 0 64 64" role="img" aria-label="byom">
-  <rect width="64" height="64" rx="14" fill="var(--bg)" />
-  <rect x="12" y="14" width="40" height="36" rx="4" fill="none" stroke="var(--text)" stroke-width="4" />
-  <path
-    d="M18 42 L27 32 L34 38 L45 24"
-    fill="none"
-    stroke="var(--accent)"
-    stroke-width="4"
-    stroke-linecap="round"
-    stroke-linejoin="round"
-  />
-  <circle cx="45" cy="24" r="4" fill="var(--accent)" />
+<svg
+  width={size}
+  height={size}
+  viewBox="0 0 {MARK_ICON.size} {MARK_ICON.size}"
+  role="img"
+  aria-label="byom"
+>
+  <rect width={MARK_ICON.size} height={MARK_ICON.size} rx={MARK_ICON.radius} fill="var(--accent)" />
+  <g transform="translate({MARK_ICON.x} {MARK_ICON.y}) scale({MARK_ICON.scale})">
+    <path d={MARK_PENNANT_PATH} fill="var(--bg)" />
+    <path
+      d={MARK_POLE_PATH}
+      fill="none"
+      stroke="var(--bg)"
+      stroke-width={MARK_POLE_WIDTH}
+      stroke-linecap="round"
+    />
+  </g>
 </svg>
