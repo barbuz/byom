@@ -6,6 +6,7 @@
   import { drawGraticule } from './lib/draw.js';
   import { buildMapArchive, suggestedArchiveName, ARCHIVE_MIME } from './lib/mapArchive.js';
   import UserPositionMarker from './components/UserPositionMarker.svelte';
+  import Icon from './lib/Icon.svelte';
   import './styles/MapViewer.css';
 
   let { mapId } = $props();
@@ -969,28 +970,32 @@
 
   <div class="controls">
     <button class="control-btn back-btn" onclick={goBack}>
-      ← Back
+      <Icon name="arrow-left" size={14} />
+      Back
     </button>
 
     <button 
       class="control-btn edit-points-btn {showingPoints ? 'active' : ''}" 
       onclick={togglePoints}
     >
-      {showingPoints ? '👁️' : '📝'} Points ({referencePoints.length})
+      <Icon name={showingPoints ? 'eye' : 'pencil'} size={14} />
+      Points ({referencePoints.length})
     </button>
 
     <button 
       class="control-btn debug-btn {showingDebug ? 'active' : ''}" 
       onclick={toggleDebug}
     >
-      🐛 Debug
+      <Icon name="bug" size={14} />
+      Debug
     </button>
 
     <button
       class="control-btn grid-btn {showingGrid ? 'active' : ''}"
       onclick={toggleGrid}
     >
-      🌐 Grid
+      <Icon name="grid" size={14} />
+      Grid
     </button>
 
     <button
@@ -998,7 +1003,8 @@
       onclick={shareMap}
       disabled={sharing}
     >
-      📤 Share
+      <Icon name="share" size={14} />
+      Share
     </button>
   </div>
 
@@ -1032,28 +1038,28 @@
   {#if showingPoints && referencePoints.length > 0}
     <div class="points-info">
       <div class="points-hint">
-        💡 Tap or click a point to edit
+        <Icon name="lightbulb" size={14} className="icon-inline" /> Tap or click a point to edit
       </div>
       <div class="points-hint">
-        📍 Add points: tap or click on the map
+        <Icon name="map-pin" size={14} className="icon-inline" /> Add points: tap or click on the map
       </div>
       {#if geoTransformError}
         <div class="transform-status transform-error">
-          ⚠️ Georeference unavailable: {geoTransformError}
+          <Icon name="alert" size={14} className="icon-inline" /> Georeference unavailable: {geoTransformError}
         </div>
       {:else}
         <div class="transform-status">
           {#if referencePoints.length === 2}
-            ✓ Similarity transform
+            <Icon name="check" size={14} className="icon-inline" /> Similarity transform
           {:else if referencePoints.length === 3}
-            ✓ Affine transform ({referencePoints.length} points)
+            <Icon name="check" size={14} className="icon-inline" /> Affine transform ({referencePoints.length} points)
           {:else}
-            ✓ Moving-least-squares warp ({referencePoints.length} points)
+            <Icon name="check" size={14} className="icon-inline" /> Moving-least-squares warp ({referencePoints.length} points)
           {/if}
         </div>
         {#if geoTransformFolded}
           <div class="transform-status transform-error">
-            ⚠️ Folded map: a reference point is likely misplaced
+            <Icon name="alert" size={14} className="icon-inline" /> Folded map: a reference point is likely misplaced
           </div>
         {/if}
       {/if}
@@ -1062,15 +1068,15 @@
     <div class="points-info">
       {#if geoTransformError}
         <div class="points-hint hint-error">
-          ⚠️ Georeference unavailable: {geoTransformError}
+          <Icon name="alert" size={14} className="icon-inline" /> Georeference unavailable: {geoTransformError}
         </div>
       {:else if geoTransformFolded}
         <div class="points-hint hint-error">
-          ⚠️ Folded map: a reference point is likely misplaced
+          <Icon name="alert" size={14} className="icon-inline" /> Folded map: a reference point is likely misplaced
         </div>
       {:else}
         <div class="points-hint">
-          📍 Add reference points: tap or click on the map
+          <Icon name="map-pin" size={14} className="icon-inline" /> Add reference points: tap or click on the map
         </div>
       {/if}
     </div>
@@ -1110,7 +1116,8 @@
         
         <div class="button-group">
           <button class="btn btn-danger" onclick={deleteEditingPoint}>
-            🗑️ Delete
+            <Icon name="trash" size={14} />
+            Delete
           </button>
           <button class="btn btn-secondary" onclick={cancelEdit}>
             Cancel
@@ -1126,7 +1133,7 @@
   {#if showingDebug}
     <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) toggleDebug(); }} onkeydown={(e) => { if (e.key === 'Escape') toggleDebug(); }}>
       <div class="modal-content debug-modal">
-        <h2>🐛 Debug Information</h2>
+        <h2><Icon name="bug" size={20} className="icon-inline" /> Debug Information</h2>
         
         <div class="debug-section">
           <h3>Current GPS Position</h3>
@@ -1169,7 +1176,13 @@
             {#if geoTransform}
               <div class="info-row">
                 <strong>Folded:</strong>
-                <span>{geoTransformFolded ? '⚠️ Yes (check reference points)' : 'No'}</span>
+                <span>
+                  {#if geoTransformFolded}
+                    <Icon name="alert" size={14} className="icon-inline" /> Yes (check reference points)
+                  {:else}
+                    No
+                  {/if}
+                </span>
               </div>
               <div class="info-row">
                 <strong>Transform Data:</strong>
@@ -1248,7 +1261,7 @@
   {#if showingCoordinateSelection}
     <div class="modal-overlay" role="dialog" aria-modal="true" tabindex="-1" onclick={(e) => { if (e.target === e.currentTarget) hideCoordinateSelection(); }} onkeydown={(e) => { if (e.key === 'Escape') hideCoordinateSelection(); }}>
       <div class="modal-content">
-        <h2>📍 Add Reference Point</h2>
+        <h2><Icon name="map-pin" size={20} className="icon-inline" /> Add Reference Point</h2>
         
         <div class="point-edit-info">
           <div class="info-row">
@@ -1262,19 +1275,19 @@
         {#if !coordinateMethod}
           <div class="method-selection">
             <button class="method-btn" onclick={() => selectCoordinateMethod('gps')}>
-              <div class="method-icon">📍</div>
+              <div class="method-icon"><Icon name="crosshair" size={18} /></div>
               <div class="method-title">Use GPS</div>
               <div class="method-desc">Use current device location</div>
             </button>
             
             <button class="method-btn" onclick={() => selectCoordinateMethod('manual')}>
-              <div class="method-icon">⌨️</div>
+              <div class="method-icon"><Icon name="pencil" size={18} /></div>
               <div class="method-title">Manual Entry</div>
               <div class="method-desc">Type coordinates</div>
             </button>
             
             <button class="method-btn" onclick={() => selectCoordinateMethod('map')}>
-              <div class="method-icon">🗺️</div>
+              <div class="method-icon"><Icon name="map" size={18} /></div>
               <div class="method-title">Select on Map</div>
               <div class="method-desc">Choose from OSM map (online)</div>
             </button>
@@ -1286,7 +1299,7 @@
               <button class="btn btn-secondary" onclick={getCurrentGPS}>Try Again</button>
             {:else if gpsPosition}
               <div class="success-message">
-                ✓ GPS location acquired
+                <Icon name="check" size={15} className="icon-inline" /> GPS location acquired
                 <div class="coords-display">
                   Lat: {gpsPosition.lat.toFixed(6)}<br>
                   Lon: {gpsPosition.lon.toFixed(6)}
@@ -1297,7 +1310,7 @@
                 </div>
               </div>
             {:else}
-              <div class="loading-message">📡 Getting GPS location...</div>
+              <div class="loading-message"><Icon name="loader" size={18} /> Getting GPS location...</div>
             {/if}
             <button class="btn btn-secondary" onclick={() => coordinateMethod = null}>
               Choose Different Method

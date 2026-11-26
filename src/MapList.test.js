@@ -91,7 +91,7 @@ describe('MapList sections', () => {
     dbMocks.getAllReferencePoints.mockResolvedValue([]);
     render(MapList);
     await screen.findByText(/no maps yet/i);
-    expect(screen.getByRole('button', { name: /add map/i })).toBeTruthy();
+    expect(screen.getByRole('button', { name: /add a map/i })).toBeTruthy();
   });
 
   it('shows an alert when loading maps fails', async () => {
@@ -219,8 +219,8 @@ describe('MapList sorting', () => {
     const otherSort = screen.getByLabelText(/sort other maps/i);
     expect(otherSort.value).toBe('distance');
 
-    // The controls are labelled "Sort by".
-    expect(screen.getAllByText('Sort by')).toHaveLength(3);
+    // The controls are labelled "Sort".
+    expect(screen.getAllByText('Sort')).toHaveLength(3);
 
     // Default direction follows the key: last-modified is newest-first (↓).
     const incompleteDirection = screen.getByLabelText(/sort direction for incomplete maps/i);
@@ -460,7 +460,7 @@ describe('MapList add map', () => {
     renderList();
     await screen.findByText('Downtown');
 
-    const addBtn = screen.getByRole('button', { name: /add map/i });
+    const addBtn = screen.getByRole('button', { name: /add a map/i });
     fireEvent.click(addBtn);
 
     // The native chooser already offers camera and files, so the app must not

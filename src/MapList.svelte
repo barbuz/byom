@@ -17,6 +17,9 @@
     positionDistanceMeters,
     sortSummaries,
   } from './lib/mapMatch.js';
+  import AppMark from './lib/AppMark.svelte';
+  import AppFooter from './lib/AppFooter.svelte';
+  import Icon from './lib/Icon.svelte';
   import './styles/MapList.css';
 
   // A fix this close to the last classified one is not worth a recompute.
@@ -355,14 +358,20 @@
 </script>
 
 <div class="container">
-  <header>
-    <h1>🗺️ BYOM</h1>
-    <p>Bring Your Own Map</p>
-  </header>
+  <header class="topbar">
+    <div class="brand">
+      <AppMark size={32} />
+      <div class="brand-copy">
+        <h1>byom</h1>
+        <p>bring your own map</p>
+      </div>
+    </div>
 
-  <div class="upload-section">
     <button class="upload-btn" onclick={openFilePicker}>
-      📷 Add Map
+      <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true">
+        <path d="M12 5v14M5 12h14" />
+      </svg>
+      Add a map
     </button>
 
     <input
@@ -372,8 +381,9 @@
       onchange={handleFileSelect}
       style="display: none;"
     />
-  </div>
+  </header>
 
+  <main class="content">
   {#if pdfPicker}
     <PdfPagePicker
       doc={pdfPicker.doc}
@@ -388,13 +398,18 @@
     <div class="loading">Loading maps...</div>
   {:else if summaries.length === 0}
     <div class="empty-state">
-      <p>No maps yet</p>
-      <p class="hint">Tap "Add Map" to get started</p>
+      <AppMark size={64} />
+      <p class="empty-title">No maps yet</p>
+      <p class="hint">Add a photo of a map, or a PDF, to begin.</p>
     </div>
   {:else}
     <section class="map-section">
       <div class="section-header">
-        <h2>📍 Maps here</h2>
+        <div class="section-title">
+          <Icon name="map-pin" size={18} className="section-icon" />
+          <h2>Maps here</h2>
+          {#if nearMaps.length > 0}<span class="count">{nearMaps.length}</span>{/if}
+        </div>
         {#if nearMaps.length > 0}
           {@render sortControl('near', 'Maps here')}
         {/if}
@@ -415,7 +430,11 @@
     {#if incompleteMaps.length > 0}
       <section class="map-section">
         <div class="section-header">
-          <h2>📌 Incomplete</h2>
+          <div class="section-title">
+            <Icon name="alert" size={18} className="section-icon" />
+            <h2>Incomplete</h2>
+            <span class="count">{incompleteMaps.length}</span>
+          </div>
           {@render sortControl('incomplete', 'Incomplete maps')}
         </div>
         <div class="maps-grid">
@@ -429,7 +448,11 @@
     {#if otherMaps.length > 0}
       <section class="map-section">
         <div class="section-header">
-          <h2>🗺️ Other maps</h2>
+          <div class="section-title">
+            <Icon name="map" size={18} className="section-icon" />
+            <h2>Other maps</h2>
+            <span class="count">{otherMaps.length}</span>
+          </div>
           {@render sortControl('other', 'Other maps')}
         </div>
         <div class="maps-grid">
@@ -441,12 +464,14 @@
     {/if}
   {/if}
 
-  <footer class="app-version">v{APP_VERSION}</footer>
+  </main>
+
+  <AppFooter version={APP_VERSION} />
 </div>
 
 {#snippet sortControl(section, label)}
   <div class="sort-control">
-    <label for={`sort-${section}`}>Sort by</label>
+    <label for={`sort-${section}`}>Sort</label>
     <select
       id={`sort-${section}`}
       value={sortState[section].key}

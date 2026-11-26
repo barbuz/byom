@@ -40,7 +40,7 @@ describe("App", () => {
   it("routes to the viewer when the hash points to a map", async () => {
     window.location.hash = "#map/1";
     render(App);
-    await screen.findByText(/← Back/);
+    await screen.findByText(/Back/);
     expect(dbMocks.getMap).toHaveBeenCalledWith(1);
   });
 
@@ -55,7 +55,7 @@ describe("App", () => {
 
     window.location.hash = "#map/1";
     render(App);
-    await screen.findByText(/← Back/);
+    await screen.findByText(/Back/);
     expect(dbMocks.getMap).toHaveBeenCalledWith(1);
 
     dbMocks.getMap.mockClear();

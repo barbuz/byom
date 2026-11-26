@@ -1,6 +1,6 @@
 {
   "name": "byom",
-  "version": "2026.11.4",
+  "version": "2026.11.5",
   "type": "module",
   "description": "BYOM - Bring Your Own Map: Georeference map photos and view GPS location offline",
   "scripts": {
@@ -10,7 +10,8 @@
     "deploy": "npm run build && gh-pages -d dist",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "icons": "node scripts/gen-icons.mjs"
   },
   "devDependencies": {
     "@sveltejs/vite-plugin-svelte": "^4.0.4",
