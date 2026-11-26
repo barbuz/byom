@@ -60,20 +60,27 @@ function markerY(markY, scale) {
   return (markY - MARK_BOUNDS.maxY) * scale;
 }
 
-/** The bowl's outline in marker pixels, scaled about the foot. */
+/** The pennant's outline in marker pixels, scaled about the foot. */
 function pennantPath(ctx, scale) {
   const { pennant } = MARK;
-  const controlX = pennant.left + pennant.control.x * (pennant.tipX - pennant.left);
-  const controlY = pennant.top + pennant.control.y * (pennant.bottom - pennant.top);
+  const spanX = pennant.tipX - pennant.left;
+  const controlX = pennant.left + pennant.control.x * spanX;
+  const controlTopY = pennant.top + (pennant.tipY - pennant.top) * pennant.control.y;
+  const controlBottomY = pennant.bottom - (pennant.bottom - pennant.tipY) * pennant.control.y;
   ctx.beginPath();
   ctx.moveTo(pennant.left * scale, markerY(pennant.top, scale));
   ctx.quadraticCurveTo(
     controlX * scale,
-    markerY(controlY, scale),
+    markerY(controlTopY, scale),
     pennant.tipX * scale,
+    markerY(pennant.tipY, scale),
+  );
+  ctx.quadraticCurveTo(
+    controlX * scale,
+    markerY(controlBottomY, scale),
+    pennant.left * scale,
     markerY(pennant.bottom, scale),
   );
-  ctx.lineTo(pennant.left * scale, markerY(pennant.bottom, scale));
   ctx.closePath();
 }
 
@@ -88,11 +95,11 @@ function polePath(ctx, scale) {
 }
 
 /**
- * Draw the mark with its foot at the current origin: a flagpole whose bowl is
- * the pennant. Callers have already translated to the point, cancelled the map
+ * Draw the mark with its foot at the current origin: a flagpole carrying the
+ * pennant. Callers have already translated to the point, cancelled the map
  * scale and counter-rotated, so the flag is upright and the same size at any
  * zoom. It is the mark's own shape at `POINT_FLAG.scale`, not a redrawn
- * variant. Returns the bowl's box, which the number is placed inside.
+ * variant. Returns the pennant's box, which the number is placed inside.
  */
 function drawFlag(ctx, color, scale = 1) {
   const s = POINT_FLAG.scale * scale;
@@ -128,11 +135,10 @@ function drawFlag(ctx, color, scale = 1) {
   };
 }
 
-/** The point's number, set inside the bowl. */
+/** The point's number, set inside the pennant. */
 function drawPointLabel(ctx, label, box) {
-  // The bowl is as wide as the b's is, so a second digit already crowds it.
   // Numbers past 9 are rare, so the face shrinks instead of the flag growing.
-  const fit = label.length === 1 ? 0.46 : label.length === 2 ? 0.37 : 0.29;
+  const fit = label.length === 1 ? 0.4 : label.length === 2 ? 0.33 : 0.26;
   ctx.font = `bold ${box.width * fit}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';

@@ -78,18 +78,22 @@ function insidePole(x, y) {
   return distanceToSegment(x, y, pole.x, pole.end, pole.x, pole.base) <= pole.width / 2;
 }
 
-// The pennant's right edge is the flipped-b bowl curve, which is monotonic in
-// y, so its x at a given height is a quadratic root.
+// The pennant's right edge is two mirrored curves meeting at the tip: the b's
+// bowl above it, its mirror below. Each is monotonic in y, so the x at a given
+// height is a quadratic root.
 function pennantRightEdge(y) {
   const { pennant } = MARK;
-  const startX = pennant.left;
+  const upper = y <= pennant.tipY;
+  const y0 = upper ? pennant.top : pennant.bottom;
+  const controlY = upper
+    ? pennant.top + (pennant.tipY - pennant.top) * pennant.control.y
+    : pennant.bottom - (pennant.bottom - pennant.tipY) * pennant.control.y;
   const controlX = pennant.left + pennant.control.x * (pennant.tipX - pennant.left);
-  const controlY = pennant.top + pennant.control.y * (pennant.bottom - pennant.top);
-  const a = pennant.top - 2 * controlY + pennant.bottom;
-  const b = 2 * (controlY - pennant.top);
-  const c = pennant.top - y;
+  const a = y0 - 2 * controlY + pennant.tipY;
+  const b = 2 * (controlY - y0);
+  const c = y0 - y;
   const t = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a);
-  return (1 - t) * (1 - t) * startX + 2 * t * (1 - t) * controlX + t * t * pennant.tipX;
+  return (1 - t) ** 2 * pennant.left + 2 * t * (1 - t) * controlX + t ** 2 * pennant.tipX;
 }
 
 function insidePennant(x, y) {

@@ -1,35 +1,37 @@
 /**
- * The byom mark: barbuz's "b" (public/barbuz-mark.svg) flipped upside down
- * and filled, so its stem reads as a flagpole and its bowl as a pennant. The
- * foot of the pole is the marked point, which makes the same shape a
- * reference-point marker and the app icon.
+ * The byom mark: barbuz's "b" (public/barbuz-mark.svg) flipped upside down,
+ * with its bowl as a pennant. The bowl's own curve forms the pennant's top
+ * edge and is mirrored below the tip, so the flag points sideways at
+ * mid-height instead of down — using the bowl as the whole sail read as a
+ * scythe. The foot of the pole is the marked point, which makes the same
+ * shape a reference-point marker and the app icon.
  *
  * Coordinates are the source mark's own; "filled" means the bowl's counter is
  * painted in, so the pennant is a solid sail rather than the b's outline.
  */
-const POLE = { x: 0, base: 94, width: 14 };
+const POLE = { x: 0, base: 82, width: 14 };
 
-/** The bowl's outline, kept exactly as the b has it. */
 const PENNANT = {
   left: POLE.x - POLE.width / 2,
-  top: -1,
-  tipX: 46,
-  bottom: 50,
+  top: 0,
+  tipX: 56,
+  tipY: 28,
+  bottom: 56,
   control: { x: 0.653, y: 0.3333 },
 };
 
 const pennantSpanX = PENNANT.tipX - PENNANT.left;
-const pennantSpanY = PENNANT.bottom - PENNANT.top;
 const controlX = PENNANT.left + PENNANT.control.x * pennantSpanX;
-const controlY = PENNANT.top + PENNANT.control.y * pennantSpanY;
+const controlTopY = PENNANT.top + (PENNANT.tipY - PENNANT.top) * PENNANT.control.y;
+const controlBottomY = PENNANT.bottom - (PENNANT.bottom - PENNANT.tipY) * PENNANT.control.y;
 
-/** The bowl's height at x, by inverting the curve's monotonic x(t). */
+/** The pennant's top edge height at x, by inverting its monotonic x(t). */
 function pennantEdgeY(x) {
   const a = PENNANT.left - 2 * controlX + PENNANT.tipX;
   const b = 2 * (controlX - PENNANT.left);
   const c = PENNANT.left - x;
   const t = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a);
-  return (1 - t) ** 2 * PENNANT.top + 2 * t * (1 - t) * controlY + t ** 2 * PENNANT.bottom;
+  return (1 - t) ** 2 * PENNANT.top + 2 * t * (1 - t) * controlTopY + t ** 2 * PENNANT.tipY;
 }
 
 /**
@@ -72,9 +74,8 @@ export const PENNANT_CONTROL = PENNANT.control;
 
 export const MARK_PENNANT_PATH =
   `M${round(PENNANT.left)},${round(PENNANT.top)}`
-  + ` Q${round(controlX)},${round(controlY)}`
-  + ` ${PENNANT.tipX},${PENNANT.bottom}`
-  + ` L${round(PENNANT.left)},${PENNANT.bottom} Z`;
+  + ` Q${round(controlX)},${round(controlTopY)} ${PENNANT.tipX},${PENNANT.tipY}`
+  + ` Q${round(controlX)},${round(controlBottomY)} ${round(PENNANT.left)},${PENNANT.bottom} Z`;
 
 /**
  * Where the mark sits inside the square app icon. The content box is 44 of 64
@@ -105,7 +106,7 @@ export const MARK_ICON = (() => {
  * which is where the number goes.
  */
 export const POINT_FLAG = (() => {
-  const height = 42;
+  const height = 40;
   const scale = height / (MARK_BOUNDS.maxY - MARK_BOUNDS.minY);
   const y = (markY) => (markY - MARK_BOUNDS.maxY) * scale;
   return {
@@ -121,11 +122,10 @@ export const POINT_FLAG = (() => {
     },
     halo: 1.6,
     hoverScale: 1.12,
-    // Number placement inside the bowl, as fractions of its box: its centroid
-    // (0.37, 0.63), nudged down so the digits sit in the sail rather than
-    // crowding the curve above them.
-    labelX: 0.4,
-    labelY: 0.7,
+    // Number placement inside the pennant, as fractions of its box: left of
+    // the tip, on the tip's own height where the sail is widest.
+    labelX: 0.42,
+    labelY: 0.5,
   };
 })();
 
