@@ -157,3 +157,8 @@ for (const size of [192, 512]) {
   writeFileSync(resolve(outDir, `icon-${size}.png`), encodePng(size, render(size)));
   console.log('wrote', `icon-${size}.png`);
 }
+
+// iOS ignores manifest icons for the home screen and falls back to a page
+// screenshot, so it needs its own link and asset.
+writeFileSync(resolve(outDir, 'apple-touch-icon.png'), encodePng(180, render(180)));
+console.log('wrote', 'apple-touch-icon.png');
