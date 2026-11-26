@@ -41,13 +41,12 @@ describe('drawPendingPoint', () => {
 
     expect(ctx.calls.some((c) => c[0] === 'quadraticCurveTo')).toBe(true);
 
+    // One ring on the ground the new point will be planted in; the pole's own
+    // round cap marks the foot.
     const arcs = ctx.calls.filter((c) => c[0] === 'arc');
-    expect(arcs).toHaveLength(2);
-    for (const [, args] of arcs) {
-      expect(args.slice(0, 2)).toEqual([0, 0]);
-    }
-    // Foot knob first, then the wider ring on the ground.
-    expect(arcs[1][1][2]).toBeGreaterThan(arcs[0][1][2]);
+    expect(arcs).toHaveLength(1);
+    expect(arcs[0][1].slice(0, 2)).toEqual([0, 0]);
+    expect(arcs[0][1][2]).toBeGreaterThan(0);
     expect(ctx.lw).toBe(2);
   });
 });
@@ -64,10 +63,11 @@ describe('drawReferencePoints', () => {
     return ctx.calls.slice(0, index).filter((c) => c[0] === 'fillStyle').pop()[1];
   }
 
-  function footRadius(options) {
+  /** The bowl's tip, which scales with the flag. */
+  function flagTip(options) {
     const ctx = fakeCtx();
     drawPoints(ctx, [{ id: 1, u: 0.1, v: 0.2 }], options);
-    return ctx.calls.filter((c) => c[0] === 'arc')[0][1][2];
+    return ctx.calls.filter((c) => c[0] === 'quadraticCurveTo')[0][1][2];
   }
 
   it('skips hidden points (showingPoints=false, no editing)', () => {
@@ -85,8 +85,11 @@ describe('drawReferencePoints', () => {
     expect(ctx.calls.filter((c) => c[0] === 'scale')[0][1][0]).toBeCloseTo(0.5);
     expect(ctx.calls.filter((c) => c[0] === 'rotate')[0][1][0]).toBeCloseTo(-0.4);
 
-    // The pole runs from the foot (0, 0) up to the top of the flag.
-    expect(ctx.calls.some((c) => c[0] === 'moveTo' && c[1][0] === 0 && c[1][1] === 0)).toBe(true);
+    // The pole is stroked from half a width below the origin, so its round
+    // bottom cap ends exactly on the point, up to where the cap hides under
+    // the bowl.
+    const pole = ctx.calls.find((c) => c[0] === 'moveTo' && c[1][0] === 0);
+    expect(pole[1][1]).toBeCloseTo(-POINT_FLAG.poleWidth / 2);
     expect(ctx.calls.some((c) => c[0] === 'quadraticCurveTo')).toBe(true);
 
     const labels = ctx.calls.filter((c) => c[0] === 'fillText');
@@ -94,17 +97,31 @@ describe('drawReferencePoints', () => {
     expect(labels[0][1][0]).toBe('1');
     // The number sits inside the pennant: right of the pole, below the flag's
     // top edge and above its bottom edge.
+    const { pennant } = POINT_FLAG;
     const [, labelX, labelY] = labels[0][1];
-    expect(labelX).toBeGreaterThan(0);
-    expect(labelX).toBeLessThan(POINT_FLAG.width);
-    expect(labelY).toBeGreaterThan(-POINT_FLAG.poleHeight);
-    expect(labelY).toBeLessThan(-POINT_FLAG.poleHeight + POINT_FLAG.height);
+    expect(labelX).toBeGreaterThan(pennant.left);
+    expect(labelX).toBeLessThan(pennant.left + pennant.width);
+    expect(labelY).toBeGreaterThan(pennant.top);
+    expect(labelY).toBeLessThan(pennant.top + pennant.height);
   });
 
   it('scales the flag up for hover and editing', () => {
-    expect(footRadius({})).toBeCloseTo(POINT_FLAG.footRadius);
-    expect(footRadius({ hoverPointIndex: 0 })).toBeCloseTo(POINT_FLAG.footRadius * POINT_FLAG.hoverScale);
-    expect(footRadius({ editingPointId: 1 })).toBeCloseTo(POINT_FLAG.footRadius * POINT_FLAG.hoverScale);
+    const tip = POINT_FLAG.pennant.left + POINT_FLAG.pennant.width;
+    expect(flagTip({})).toBeCloseTo(tip);
+    expect(flagTip({ hoverPointIndex: 0 })).toBeCloseTo(tip * POINT_FLAG.hoverScale);
+    expect(flagTip({ editingPointId: 1 })).toBeCloseTo(tip * POINT_FLAG.hoverScale);
+  });
+
+  it('shrinks the number for multi-digit labels instead of widening the flag', () => {
+    const fontFor = (count) => {
+      const ctx = fakeCtx();
+      const points = Array.from({ length: count }, (_, i) => ({ id: i + 1, u: 0.1, v: 0.2 }));
+      drawPoints(ctx, points);
+      return Number(ctx.fn.match(/([\d.]+)px/)[1]);
+    };
+
+    expect(fontFor(10)).toBeLessThan(fontFor(1));
+    expect(fontFor(100)).toBeLessThan(fontFor(10));
   });
 
   it('uses the editing color when editingPointId matches', () => {

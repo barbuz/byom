@@ -75,15 +75,14 @@ function distanceToSegment(px, py, ax, ay, bx, by) {
 
 function insidePole(x, y) {
   const { pole } = MARK;
-  return distanceToSegment(x, y, pole.x, pole.top, pole.x, pole.base) <= pole.width / 2;
+  return distanceToSegment(x, y, pole.x, pole.end, pole.x, pole.base) <= pole.width / 2;
 }
 
 // The pennant's right edge is the flipped-b bowl curve, which is monotonic in
-// y, so its x at a given height is a quadratic root. It starts at `flatTo`,
-// where the flag's straight top edge ends.
+// y, so its x at a given height is a quadratic root.
 function pennantRightEdge(y) {
   const { pennant } = MARK;
-  const startX = pennant.flatTo;
+  const startX = pennant.left;
   const controlX = pennant.left + pennant.control.x * (pennant.tipX - pennant.left);
   const controlY = pennant.top + pennant.control.y * (pennant.bottom - pennant.top);
   const a = pennant.top - 2 * controlY + pennant.bottom;

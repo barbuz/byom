@@ -1,6 +1,6 @@
 import { geoToUV, geoDistanceToUV, imageDivisor } from './transforms.js';
 import { pickGridStepForScale, visibleLines } from './grid.js';
-import { PENNANT_CONTROL, POINT_FLAG } from './flagMark.js';
+import { MARK, MARK_BOUNDS, POINT_FLAG } from './flagMark.js';
 
 // The user marker is a screen-space overlay: its radius is in CSS pixels and
 // must not grow with the map. The accuracy ring, however, is a ground distance
@@ -55,39 +55,47 @@ function drawAccuracyRing(ctx, point, geoTransform, imageWidth, imageHeight) {
   ctx.stroke();
 }
 
+/** Screen y for a mark y, with the pole's foot on the current origin. */
+function markerY(markY, scale) {
+  return (markY - MARK_BOUNDS.maxY) * scale;
+}
+
+/** The bowl's outline in marker pixels, scaled about the foot. */
+function pennantPath(ctx, scale) {
+  const { pennant } = MARK;
+  const controlX = pennant.left + pennant.control.x * (pennant.tipX - pennant.left);
+  const controlY = pennant.top + pennant.control.y * (pennant.bottom - pennant.top);
+  ctx.beginPath();
+  ctx.moveTo(pennant.left * scale, markerY(pennant.top, scale));
+  ctx.quadraticCurveTo(
+    controlX * scale,
+    markerY(controlY, scale),
+    pennant.tipX * scale,
+    markerY(pennant.bottom, scale),
+  );
+  ctx.lineTo(pennant.left * scale, markerY(pennant.bottom, scale));
+  ctx.closePath();
+}
+
+/**
+ * The pole, from the foot up to where its round cap hides under the bowl. The
+ * stroke's bottom cap reaches exactly the origin, so the foot is the point.
+ */
+function polePath(ctx, scale) {
+  ctx.beginPath();
+  ctx.moveTo(0, markerY(MARK.pole.base, scale));
+  ctx.lineTo(0, markerY(MARK.pole.end, scale));
+}
+
 /**
  * Draw the mark with its foot at the current origin: a flagpole whose bowl is
  * the pennant. Callers have already translated to the point, cancelled the map
  * scale and counter-rotated, so the flag is upright and the same size at any
- * zoom. Returns the flag's box, which the number is placed inside.
+ * zoom. It is the mark's own shape at `POINT_FLAG.scale`, not a redrawn
+ * variant. Returns the bowl's box, which the number is placed inside.
  */
 function drawFlag(ctx, color, scale = 1) {
-  const poleHeight = POINT_FLAG.poleHeight * scale;
-  const poleWidth = POINT_FLAG.poleWidth * scale;
-  const flagWidth = POINT_FLAG.width * scale;
-  const flagHeight = POINT_FLAG.height * scale;
-  const left = -poleWidth / 2;
-  const flatTo = poleWidth / 2;
-  const top = -poleHeight;
-  const bottom = top + flagHeight;
-  // The pole's round cap ends level with the flag's top edge: on the
-  // centreline the cap reaches `top` when the stroke stops half a width short,
-  // so no pole end pokes out above the flag.
-  const poleEnd = top + poleWidth / 2;
-
-  const pennant = () => {
-    ctx.beginPath();
-    ctx.moveTo(left, top);
-    ctx.lineTo(flatTo, top);
-    ctx.quadraticCurveTo(
-      left + flagWidth * PENNANT_CONTROL.x,
-      top + flagHeight * PENNANT_CONTROL.y,
-      flagWidth,
-      bottom,
-    );
-    ctx.lineTo(left, bottom);
-    ctx.closePath();
-  };
+  const s = POINT_FLAG.scale * scale;
 
   ctx.save();
   ctx.lineJoin = 'round';
@@ -97,42 +105,35 @@ function drawFlag(ctx, color, scale = 1) {
   // which keeps the flag readable over dark map features.
   ctx.strokeStyle = 'white';
   ctx.lineWidth = POINT_FLAG.halo * 2;
-  pennant();
+  pennantPath(ctx, s);
   ctx.stroke();
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(0, poleEnd);
-  ctx.lineWidth = poleWidth + POINT_FLAG.halo * 2;
+  ctx.lineWidth = MARK.pole.width * s + POINT_FLAG.halo * 2;
+  polePath(ctx, s);
   ctx.stroke();
 
   ctx.fillStyle = color;
-  pennant();
+  pennantPath(ctx, s);
   ctx.fill();
   ctx.strokeStyle = color;
-  ctx.lineWidth = poleWidth;
-  ctx.beginPath();
-  ctx.moveTo(0, 0);
-  ctx.lineTo(0, poleEnd);
-  ctx.stroke();
-
-  // A knob at the foot makes the planted location explicit.
-  ctx.beginPath();
-  ctx.arc(0, 0, POINT_FLAG.footRadius * scale, 0, Math.PI * 2);
-  ctx.fillStyle = color;
-  ctx.fill();
-  ctx.strokeStyle = 'white';
-  ctx.lineWidth = 1.2;
+  ctx.lineWidth = MARK.pole.width * s;
+  polePath(ctx, s);
   ctx.stroke();
 
   ctx.restore();
-  return { left, top, width: flagWidth, height: flagHeight };
+  return {
+    left: MARK.pennant.left * s,
+    top: markerY(MARK.pennant.top, s),
+    width: (MARK.pennant.tipX - MARK.pennant.left) * s,
+    height: (MARK.pennant.bottom - MARK.pennant.top) * s,
+  };
 }
 
-/** The point's number, set inside the pennant. */
+/** The point's number, set inside the bowl. */
 function drawPointLabel(ctx, label, box) {
-  // Three digits need a smaller face to stay inside the sail.
-  const size = label.length > 2 ? 9 : 11;
-  ctx.font = `bold ${size}px sans-serif`;
+  // The bowl is as wide as the b's is, so a second digit already crowds it.
+  // Numbers past 9 are rare, so the face shrinks instead of the flag growing.
+  const fit = label.length === 1 ? 0.46 : label.length === 2 ? 0.37 : 0.29;
+  ctx.font = `bold ${box.width * fit}px sans-serif`;
   ctx.textAlign = 'center';
   ctx.textBaseline = 'middle';
   ctx.fillStyle = 'white';
