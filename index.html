@@ -5,6 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <meta name="theme-color" content="#faf8f3">
   <meta name="description" content="Georeference a photo of a map, then navigate it offline.">
+  <script>
+    // Resolve day/night before first paint so a night reader never sees a light flash.
+    (function () {
+      var stored = null;
+      try { stored = localStorage.getItem('byom:theme'); } catch (e) { /* storage blocked */ }
+      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var theme = stored === 'dark' || (stored !== 'light' && prefersDark) ? 'dark' : 'light';
+      document.documentElement.dataset.theme = theme;
+      document.documentElement.classList.remove('face--barbuz', 'face--leo');
+      document.documentElement.classList.add(theme === 'dark' ? 'face--barbuz' : 'face--leo');
+      var meta = document.querySelector('meta[name="theme-color"]');
+      if (meta) meta.setAttribute('content', theme === 'dark' ? '#0a0e17' : '#faf8f3');
+    })();
+  </script>
   <link rel="icon" type="image/svg+xml" href="/favicon.svg">
   <link rel="manifest" href="/manifest.json">
   <link rel="preconnect" href="https://fonts.googleapis.com">

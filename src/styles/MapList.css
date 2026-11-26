@@ -54,6 +54,18 @@ h1 {
   text-overflow: ellipsis;
 }
 
+.topbar-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex: 0 0 auto;
+}
+
+.theme-slot {
+  display: flex;
+  align-items: center;
+}
+
 .upload-btn {
   display: inline-flex;
   align-items: center;
@@ -313,10 +325,22 @@ h1 {
     flex-wrap: wrap;
   }
 
+  /* Let the switch and the upload button become topbar items directly, so the
+     switch can take the empty top-right corner and the upload button can span
+     the row below it. */
+  .topbar-actions {
+    display: contents;
+  }
+
+  .theme-slot {
+    order: 2;
+    margin-left: auto;
+  }
+
   .upload-btn {
-    width: 100%;
-    justify-content: center;
     order: 3;
+    flex: 1 0 100%;
+    justify-content: center;
   }
 }
 
