@@ -80,7 +80,10 @@ function insidePole(x, y) {
 
 // The pennant's right edge is two mirrored curves meeting at the tip: the b's
 // bowl above it, its mirror below. Each is monotonic in y, so the x at a given
-// height is a quadratic root.
+// height is a quadratic root — but the mirrored half flips the sign of the
+// quadratic's leading coefficient, so the root has to be picked by its range:
+// the `-b + sqrt` root leaves [0, 1] below the tip, which silently drops the
+// lower half and draws the old scythe (curved top over a flat bottom).
 function pennantRightEdge(y) {
   const { pennant } = MARK;
   const upper = y <= pennant.tipY;
@@ -92,9 +95,24 @@ function pennantRightEdge(y) {
   const a = y0 - 2 * controlY + pennant.tipY;
   const b = 2 * (controlY - y0);
   const c = y0 - y;
-  const t = (-b + Math.sqrt(b * b - 4 * a * c)) / (2 * a);
+  const root = Math.sqrt(b * b - 4 * a * c);
+  const t = [(-b + root) / (2 * a), (-b - root) / (2 * a)].find((value) => value >= 0 && value <= 1);
   return (1 - t) ** 2 * pennant.left + 2 * t * (1 - t) * controlX + t ** 2 * pennant.tipX;
 }
+
+// The sail is symmetric about the tip's height; a rasteriser that drops the
+// mirrored half draws the old scythe, so refuse to write icons unless both
+// halves agree.
+(() => {
+  const { tipY } = MARK.pennant;
+  for (const offset of [4, 8, 12, 16]) {
+    const above = pennantRightEdge(tipY - offset);
+    const below = pennantRightEdge(tipY + offset);
+    if (!Number.isFinite(above) || !Number.isFinite(below) || Math.abs(above - below) > 1e-9) {
+      throw new Error(`pennant is not symmetric about the tip (${above} vs ${below} at +/-${offset})`);
+    }
+  }
+})();
 
 function insidePennant(x, y) {
   const { pennant } = MARK;
@@ -157,3 +175,8 @@ for (const size of [192, 512]) {
   writeFileSync(resolve(outDir, `icon-${size}.png`), encodePng(size, render(size)));
   console.log('wrote', `icon-${size}.png`);
 }
+
+// iOS ignores manifest icons for the home screen and falls back to a page
+// screenshot, so it needs its own link and asset.
+writeFileSync(resolve(outDir, 'apple-touch-icon.png'), encodePng(180, render(180)));
+console.log('wrote', 'apple-touch-icon.png');
